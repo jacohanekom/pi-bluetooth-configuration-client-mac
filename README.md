@@ -6,26 +6,51 @@ over Bluetooth LE, using the Mac's own Bluetooth adapter. Scans for the
 Pi, pairs, lets you pick or type a network, and shows live connect status
 -- no SSH, no keyboard on the Pi.
 
-Built with SwiftUI + CoreBluetooth, packaged as a plain Swift Package
-Manager executable (no Xcode project).
+Built with SwiftUI + CoreBluetooth, packaged with plain Swift Package
+Manager (no Xcode project).
 
 ## Requirements
 
 - macOS 13 (Ventura) or later, with Bluetooth on
 - A Pi running `pi-bluetooth-configuration`, advertising and reachable
 
-## Build and run
+## Run without building an app bundle (fastest, for development)
 
 ```sh
 swift build
 swift run pi-bluetooth-configuration-client-mac
 ```
 
-There's no signed/notarized release build yet -- this is a locally-built
-SPM executable, not a distributable `.app`. First launch will prompt for
-Bluetooth permission (via the `NSBluetoothAlwaysUsageDescription`
-embedded directly into the binary's Mach-O `__info_plist` section, since
-there's no app bundle to hold a real `Info.plist`).
+This runs the bare SPM executable, not a `.app`. It still gets a working
+Bluetooth permission prompt via `NSBluetoothAlwaysUsageDescription`
+embedded directly into the binary's Mach-O `__info_plist` section (see
+`Package.swift`) -- CoreBluetooth requires that string to exist
+somewhere, bundle or not.
+
+## Build a proper .app bundle
+
+```sh
+make app
+open pi-bluetooth-configuration-client-mac.app
+```
+
+`make app` release-builds the executable, assembles a standard
+`Contents/MacOS` + `Contents/Info.plist` bundle
+(`scripts/build_app.sh`), and ad-hoc code-signs it (`codesign --sign -`)
+so macOS treats every rebuild as the same stable app identity -- without
+that, Gatekeeper/TCC would re-prompt for Bluetooth access on every
+rebuild, since an unsigned binary's identity is its exact bytes. The
+bundle isn't notarized or signed with a real Developer ID, so macOS may
+still show an "unidentified developer" warning the first time you open
+it (right-click → Open, or allow it in System Settings → Privacy &
+Security).
+
+Once built, `pi-bluetooth-configuration-client-mac.app` behaves like any
+other Mac app -- it can be dragged into `/Applications`, launched from
+Spotlight, etc.
+
+`make run` builds the bundle and opens it in one step. `make clean`
+removes both `.build/` and the `.app`.
 
 ## Using it
 

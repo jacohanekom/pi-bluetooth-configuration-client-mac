@@ -3,6 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
+    <string>Pi Bluetooth Config</string>
+    <key>CFBundleExecutable</key>
     <string>pi-bluetooth-configuration-client-mac</string>
     <key>CFBundleIdentifier</key>
     <string>com.jacohanekom.pi-bluetooth-configuration-client-mac</string>

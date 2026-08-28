@@ -20,3 +20,12 @@ jobs:
 
       - name: Build
         run: swift build -v
+
+      - name: Build .app bundle
+        run: make app
+
+      - name: Verify bundle structure and signature
+        run: |
+          test -x pi-bluetooth-configuration-client-mac.app/Contents/MacOS/pi-bluetooth-configuration-client-mac
+          plutil -lint pi-bluetooth-configuration-client-mac.app/Contents/Info.plist
+          codesign -dv pi-bluetooth-configuration-client-mac.app
