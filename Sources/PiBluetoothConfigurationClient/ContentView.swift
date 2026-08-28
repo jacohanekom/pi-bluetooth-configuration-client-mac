@@ -87,6 +87,7 @@ struct ContentView: View {
             Text("Connected to \(ble.connectedName ?? "device")")
                 .font(.headline)
 
+            transportBadge
             statusBadge
 
             GroupBox("WiFi network") {
@@ -132,6 +133,18 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var transportBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: ble.usingNetwork ? "wifi" : "dot.radiowaves.left.and.right")
+                .foregroundStyle(.secondary)
+            Text(ble.usingNetwork
+                 ? "Managing over WiFi (\(ble.networkHost ?? ""))"
+                 : "Managing over Bluetooth")
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
     }
 
     private var statusBadge: some View {

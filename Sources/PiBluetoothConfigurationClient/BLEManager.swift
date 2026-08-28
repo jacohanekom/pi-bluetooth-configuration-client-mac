@@ -1,11 +1,20 @@
 import CoreBluetooth
 import Foundation
 
-/// Central-role BLE client for pi-bluetooth-configuration's GATT service.
+/// Central-role BLE client for pi-bluetooth-configuration's GATT service,
+/// with a handoff to NetworkControlClient once the Pi has an IP.
+///
 /// Pairing itself isn't driven from here -- the peripheral marks every
 /// characteristic "encrypt-read"/"encrypt-write", so macOS's Bluetooth
 /// stack triggers pairing automatically the first time we touch one, the
 /// same way it would for any other encrypted GATT characteristic.
+///
+/// The Pi 3's onboard Bluetooth shares an antenna with its WiFi radio, so
+/// BLE routinely drops once WiFi is actively passing traffic -- a
+/// hardware limitation, not a bug (see pi-bluetooth-configuration-alpine's
+/// README). Once Status reports a non-empty ip, this switches to polling
+/// the Pi's TCP control interface instead of continuing to rely on BLE,
+/// and treats a subsequent BLE disconnect as expected rather than an error.
 @MainActor
 final class BLEManager: NSObject, ObservableObject {
     struct DiscoveredDevice: Identifiable {
@@ -15,6 +24,10 @@ final class BLEManager: NSObject, ObservableObject {
         let peripheral: CBPeripheral
     }
 
+    static let networkControlPort: UInt16 = 8567
+    static let networkPollInterval: TimeInterval = 2
+    static let scanResultsFetchDelay: TimeInterval = 5
+
     @Published private(set) var isBluetoothReady = false
     @Published private(set) var discoveredDevices: [DiscoveredDevice] = []
     @Published private(set) var isConnecting = false
@@ -22,11 +35,18 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var connectedName: String?
     @Published private(set) var status: WifiStatus = .idle
     @Published private(set) var scanResults: [WifiScanResult] = []
+    @Published private(set) var usingNetwork = false
+    @Published private(set) var networkHost: String?
     @Published var lastError: String?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var characteristics: [CBUUID: CBCharacteristic] = [:]
+
+    private var networkClient: NetworkControlClient?
+    private var statusPollTimer: Timer?
+    private var stagedSSID = ""
+    private var stagedPassword = ""
 
     override init() {
         super.init()
@@ -45,6 +65,7 @@ final class BLEManager: NSObject, ObservableObject {
     }
 
     func connect(to device: DiscoveredDevice) {
+        tearDownNetworkClient()
         stopScan()
         lastError = nil
         isConnecting = true
@@ -54,24 +75,84 @@ final class BLEManager: NSObject, ObservableObject {
     }
 
     func disconnect() {
-        guard let peripheral else { return }
-        central.cancelPeripheralConnection(peripheral)
+        tearDownNetworkClient()
+        if let peripheral {
+            central.cancelPeripheralConnection(peripheral)
+        }
+        resetConnectionState()
     }
 
     func writeSSID(_ ssid: String) {
+        stagedSSID = ssid
+        guard !usingNetwork else { return } // sent inline with "connect" over the network protocol
         write(ssid, to: GATT.ssidUUID)
     }
 
     func writePassword(_ password: String) {
+        stagedPassword = password
+        guard !usingNetwork else { return }
         write(password, to: GATT.passwordUUID)
     }
 
     func sendCommand(_ command: String) {
+        guard !usingNetwork else {
+            sendNetworkCommand(command)
+            return
+        }
         write(command, to: GATT.commandUUID)
     }
 
     func refreshScanResults() {
+        guard !usingNetwork else {
+            networkClient?.send(cmd: "scanresults")
+            return
+        }
         readValue(GATT.scanResultsUUID)
+    }
+
+    private func sendNetworkCommand(_ command: String) {
+        switch command {
+        case "scan":
+            networkClient?.send(cmd: "scan")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.scanResultsFetchDelay) { [weak self] in
+                self?.networkClient?.send(cmd: "scanresults")
+            }
+        case "connect":
+            networkClient?.send(cmd: "connect", extra: ["ssid": stagedSSID, "psk": stagedPassword])
+        case "forget":
+            networkClient?.send(cmd: "forget")
+        default:
+            break
+        }
+    }
+
+    // Called once Status (over BLE) reports a connected state with an IP
+    // -- from then on, the TCP interface is authoritative, and a BLE drop
+    // is expected rather than treated as an error.
+    private func switchToNetworkControl(host: String) {
+        guard !usingNetwork else { return }
+        usingNetwork = true
+        networkHost = host
+
+        let client = NetworkControlClient()
+        client.onStatus = { [weak self] s in self?.status = s }
+        client.onScanResults = { [weak self] r in self?.scanResults = r.sorted { $0.rssi > $1.rssi } }
+        client.onError = { [weak self] e in self?.lastError = e }
+        client.connect(host: host, port: Self.networkControlPort)
+        networkClient = client
+
+        statusPollTimer = Timer.scheduledTimer(withTimeInterval: Self.networkPollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.networkClient?.send(cmd: "status") }
+        }
+    }
+
+    private func tearDownNetworkClient() {
+        statusPollTimer?.invalidate()
+        statusPollTimer = nil
+        networkClient?.disconnect()
+        networkClient = nil
+        usingNetwork = false
+        networkHost = nil
     }
 
     private func write(_ string: String, to uuid: CBUUID) {
@@ -133,6 +214,14 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        if usingNetwork {
+            // Expected: the Pi 3's combo WiFi/BT chip often drops BLE once
+            // WiFi is actively passing traffic, and we've already handed
+            // off to the network control channel -- not an error.
+            self.peripheral = nil
+            characteristics.removeAll()
+            return
+        }
         if let error {
             lastError = error.localizedDescription
         }
@@ -181,6 +270,9 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         case GATT.statusUUID:
             if let decoded = try? JSONDecoder().decode(WifiStatus.self, from: data) {
                 status = decoded
+                if decoded.state == "connected", !decoded.ip.isEmpty {
+                    switchToNetworkControl(host: decoded.ip)
+                }
             }
         case GATT.scanResultsUUID:
             if let decoded = try? JSONDecoder().decode([WifiScanResult].self, from: data) {

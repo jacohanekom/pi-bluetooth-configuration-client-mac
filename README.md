@@ -9,6 +9,17 @@ Pi, pairs, lets you pick or type a network, and shows live connect status
 Built with SwiftUI + CoreBluetooth, packaged with plain Swift Package
 Manager (no Xcode project).
 
+The Raspberry Pi 3's onboard Bluetooth chip shares a single antenna with
+its WiFi radio, so BLE connections routinely drop once the Pi's WiFi is
+actively passing traffic -- a hardware limitation of that chip, not a
+bug in this app or the daemon. So this app hands off: once the Pi
+reports a connected state with an IP address (still over BLE, since
+that's the only channel that exists at that point), it switches to
+polling the Pi's plain TCP control interface on the LAN for everything
+else, and a subsequent BLE disconnect is treated as expected rather than
+an error. See `NetworkControlClient.swift` and the daemon's README
+("WiFi/Bluetooth coexistence and the TCP handoff").
+
 ## Requirements
 
 - macOS 13 (Ventura) or later, with Bluetooth on
@@ -84,21 +95,33 @@ removes both `.build/` and the `.app`.
 6. Watch the status line -- it updates live via GATT notifications as
    the Pi progresses through `connecting` → `connected` (with the
    assigned IP) or `failed` (with an error message).
-7. **Forget** clears whatever network the Pi last configured through
-   this daemon.
+7. Once `connected` with an IP shows up, the small badge above the
+   status line switches from "Managing over Bluetooth" to "Managing
+   over WiFi (ip)" -- the app has handed off to the Pi's TCP control
+   interface at that point, polling it every 2s. A BLE disconnect after
+   this point is normal (see above) and won't reset the UI.
+8. **Forget** clears whatever network the Pi last configured through
+   this daemon, over whichever channel (BLE or network) is currently
+   active.
 
-## GATT protocol
+## Protocols
 
-Talks directly to the same custom 128-bit-UUID service documented in
-[pi-bluetooth-configuration-alpine's README](https://github.com/jacohanekom/pi-bluetooth-configuration-alpine#gatt-service) --
-`Models.swift` in this repo has the exact UUIDs and JSON shapes. This
-client doesn't add any protocol of its own; it's a thin CoreBluetooth
-front end for that GATT service.
+Two, matching whichever channel is active -- see
+[pi-bluetooth-configuration-alpine's README](https://github.com/jacohanekom/pi-bluetooth-configuration-alpine)
+for both in full:
+
+- **GATT** (`Models.swift` has the exact UUIDs/JSON shapes) -- used from
+  first connection until the Pi reports an IP.
+- **TCP** (`NetworkControlClient.swift`) -- one JSON object per line,
+  same commands (`status`/`scan`/`scanresults`/`connect`/`forget`) as
+  the BLE Command characteristic, just addressed at the Pi's IP on port
+  `8567` instead of via GATT. Unauthenticated, same as the daemon side --
+  see its README before relying on this on an untrusted network.
 
 ## Known limitations (v1)
 
 - One connection at a time -- connecting to a new device disconnects
-  the previous one.
+  the previous one (and tears down any active network handoff first).
 - No persisted list of previously-seen Pis; every launch re-scans.
 - Pairing/bonding state is entirely macOS's own Bluetooth stack's
   business -- this app doesn't manage the system pairing list. If a Pi
@@ -106,3 +129,6 @@ front end for that GATT service.
   **System Settings → Bluetooth** if reconnecting ever fails oddly.
 - Not code-signed or notarized; Gatekeeper may warn if you ever
   distribute the built binary outside of building it yourself.
+- The network handoff polls status every 2s rather than pushing updates
+  -- if the Pi's IP changes (DHCP renewal to a different address) while
+  connected, the app won't notice; disconnect and reconnect via BLE.
