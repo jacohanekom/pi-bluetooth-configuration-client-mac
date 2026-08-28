@@ -5,6 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# This account's default GITHUB_TOKEN workflow permission is read-only,
+# so the release step below would otherwise fail with "Resource not
+# accessible by integration" on every tag push.
+permissions:
+  contents: write
+
 jobs:
   build:
     # Real Bluetooth hardware doesn't matter for a compile check, but this
