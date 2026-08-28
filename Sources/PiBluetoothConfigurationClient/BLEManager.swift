@@ -27,6 +27,8 @@ final class BLEManager: NSObject, ObservableObject {
     static let networkControlPort: UInt16 = 8567
     static let networkPollInterval: TimeInterval = 2
     static let scanResultsFetchDelay: TimeInterval = 5
+    static let maxReconnectAttempts = 3
+    static let reconnectDelay: TimeInterval = 1
 
     @Published private(set) var isBluetoothReady = false
     @Published private(set) var discoveredDevices: [DiscoveredDevice] = []
@@ -47,6 +49,14 @@ final class BLEManager: NSObject, ObservableObject {
     private var statusPollTimer: Timer?
     private var stagedSSID = ""
     private var stagedPassword = ""
+
+    // Many BLE stacks (BlueZ included) drop the connection right after
+    // completing pairing/bonding and expect the central to reconnect over
+    // the now-encrypted link -- that's a normal handshake step, not a
+    // failure, so an unexpected disconnect gets a few silent reconnect
+    // attempts before it's surfaced as an actual error.
+    private var userInitiatedDisconnect = false
+    private var reconnectAttempts = 0
 
     override init() {
         super.init()
@@ -69,6 +79,8 @@ final class BLEManager: NSObject, ObservableObject {
         stopScan()
         lastError = nil
         isConnecting = true
+        userInitiatedDisconnect = false
+        reconnectAttempts = 0
         peripheral = device.peripheral
         peripheral?.delegate = self
         central.connect(device.peripheral, options: nil)
@@ -76,6 +88,7 @@ final class BLEManager: NSObject, ObservableObject {
 
     func disconnect() {
         tearDownNetworkClient()
+        userInitiatedDisconnect = true
         if let peripheral {
             central.cancelPeripheralConnection(peripheral)
         }
@@ -202,6 +215,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        reconnectAttempts = 0
         isConnecting = false
         isConnected = true
         connectedName = peripheral.name
@@ -222,9 +236,30 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             characteristics.removeAll()
             return
         }
-        if let error {
-            lastError = error.localizedDescription
+
+        if userInitiatedDisconnect {
+            userInitiatedDisconnect = false
+            if let error { lastError = error.localizedDescription }
+            resetConnectionState()
+            return
         }
+
+        // Unexpected disconnect, most commonly right after first-time
+        // pairing/bonding completes -- BlueZ (and most BLE stacks) drop
+        // the connection at that point and expect the central to
+        // reconnect over the now-encrypted link. Retry a few times
+        // before treating it as an actual failure.
+        if reconnectAttempts < Self.maxReconnectAttempts {
+            reconnectAttempts += 1
+            isConnecting = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.reconnectDelay) { [weak self] in
+                guard let self else { return }
+                self.central.connect(peripheral, options: nil)
+            }
+            return
+        }
+
+        lastError = error?.localizedDescription ?? "Disconnected unexpectedly and could not reconnect"
         resetConnectionState()
     }
 }

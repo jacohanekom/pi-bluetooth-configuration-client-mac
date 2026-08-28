@@ -88,6 +88,11 @@ removes both `.build/` and the `.app`.
    headless Pi has no display/keyboard), so there's no PIN to confirm;
    macOS pairs and encrypts the link automatically. See the daemon's
    README for what that trade-off does and doesn't protect against.
+   It's normal for BlueZ to drop the connection right as pairing
+   completes and expect a reconnect over the now-encrypted link -- the
+   app retries automatically (up to 3 times, 1s apart) and this
+   shouldn't be visible beyond a brief pause; it's only surfaced as an
+   error if all retries are exhausted.
 4. Optionally click **Scan Networks** and tap a result to fill in the
    SSID field, or just type the SSID directly.
 5. Enter the password (leave blank for an open network) and click
