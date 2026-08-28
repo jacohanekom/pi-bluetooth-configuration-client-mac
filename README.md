@@ -14,6 +14,21 @@ Manager (no Xcode project).
 - macOS 13 (Ventura) or later, with Bluetooth on
 - A Pi running `pi-bluetooth-configuration`, advertising and reachable
 
+## Download a release
+
+Every push builds `pi-bluetooth-configuration-client-mac-macos.zip`
+(GitHub Actions artifact; tagged `v*` pushes also attach it to a
+[GitHub Release](https://github.com/jacohanekom/pi-bluetooth-configuration-client-mac/releases)).
+It's an ad-hoc-signed `.app` -- not notarized, no Developer ID -- so a
+browser download will carry the quarantine flag and Gatekeeper will
+refuse to open it normally the first time:
+
+```sh
+unzip pi-bluetooth-configuration-client-mac-macos.zip
+xattr -d com.apple.quarantine pi-bluetooth-configuration-client-mac.app   # or right-click -> Open
+open pi-bluetooth-configuration-client-mac.app
+```
+
 ## Run without building an app bundle (fastest, for development)
 
 ```sh

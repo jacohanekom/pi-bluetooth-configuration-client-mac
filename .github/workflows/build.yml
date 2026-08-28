@@ -29,3 +29,20 @@ jobs:
           test -x pi-bluetooth-configuration-client-mac.app/Contents/MacOS/pi-bluetooth-configuration-client-mac
           plutil -lint pi-bluetooth-configuration-client-mac.app/Contents/Info.plist
           codesign -dv pi-bluetooth-configuration-client-mac.app
+
+      - name: Zip .app bundle
+        run: |
+          # ditto (not plain zip) preserves the bundle's extended
+          # attributes/code signature correctly.
+          ditto -c -k --keepParent pi-bluetooth-configuration-client-mac.app pi-bluetooth-configuration-client-mac-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-bluetooth-configuration-client-mac
+          path: pi-bluetooth-configuration-client-mac-macos.zip
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pi-bluetooth-configuration-client-mac-macos.zip
