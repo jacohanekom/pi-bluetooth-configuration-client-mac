@@ -14,10 +14,17 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             } else if !ble.isConnected {
                 deviceListSection
+            } else if ble.status.state == "connected" {
+                wifiConnectedSection
             } else {
-                connectedSection
+                configureSection
             }
 
+            if let info = ble.lastInfo {
+                Text(info)
+                    .foregroundStyle(.green)
+                    .font(.footnote)
+            }
             if let error = ble.lastError {
                 Text(error)
                     .foregroundStyle(.red)
@@ -82,12 +89,40 @@ struct ContentView: View {
         }
     }
 
-    private var connectedSection: some View {
+    // Shown once the Pi reports its WiFi is actually connected -- the
+    // provisioning job is done at this point, so there's nothing left to
+    // configure, just the result and a way to undo it.
+    private var wifiConnectedSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Connected to \(ble.connectedName ?? "device")")
                 .font(.headline)
 
-            transportBadge
+            GroupBox("WiFi") {
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent("Network", value: ble.status.ssid)
+                    LabeledContent("IP address", value: ble.status.ip)
+                }
+                .padding(.top, 4)
+            }
+
+            Text("The Pi will reboot shortly to finish applying this. The Bluetooth connection will drop when it does -- that's expected.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Button("Forget This Network") {
+                ble.sendCommand("forget")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    // Shown before WiFi is connected: staging SSID/password, scanning,
+    // and live connect progress/failure feedback.
+    private var configureSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Connected to \(ble.connectedName ?? "device")")
+                .font(.headline)
+
             statusBadge
 
             GroupBox("WiFi network") {
@@ -99,9 +134,6 @@ struct ContentView: View {
                             ble.sendCommand("scan")
                         }
                         Spacer()
-                        Button("Forget") {
-                            ble.sendCommand("forget")
-                        }
                         Button("Connect") {
                             ble.writeSSID(ssid)
                             ble.writePassword(password)
@@ -135,18 +167,6 @@ struct ContentView: View {
         }
     }
 
-    private var transportBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: ble.usingNetwork ? "wifi" : "dot.radiowaves.left.and.right")
-                .foregroundStyle(.secondary)
-            Text(ble.usingNetwork
-                 ? "Managing over WiFi (\(ble.networkHost ?? ""))"
-                 : "Managing over Bluetooth")
-                .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-    }
-
     private var statusBadge: some View {
         HStack(spacing: 8) {
             Circle()
@@ -169,8 +189,6 @@ struct ContentView: View {
 
     private var statusText: String {
         switch ble.status.state {
-        case "connected":
-            return "Connected to \(ble.status.ssid) — \(ble.status.ip)"
         case "connecting":
             return "Connecting to \(ble.status.ssid)…"
         case "scanning":
