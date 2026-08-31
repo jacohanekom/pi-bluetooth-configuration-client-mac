@@ -129,9 +129,15 @@ for both in full:
   the previous one (and tears down any active network handoff first).
 - No persisted list of previously-seen Pis; every launch re-scans.
 - Pairing/bonding state is entirely macOS's own Bluetooth stack's
-  business -- this app doesn't manage the system pairing list. If a Pi
-  gets reflashed/re-keyed, remove the stale pairing from
-  **System Settings → Bluetooth** if reconnecting ever fails oddly.
+  business -- this app doesn't manage the system pairing list. If the
+  Pi's `bluetoothd` pairing record for this Mac ever gets reset (e.g.
+  `bluetoothctl remove <mac>` on the Pi, or a fresh install of the
+  daemon's dependencies), the Mac's side goes stale and every connection
+  attempt fails immediately with CoreBluetooth's
+  `peerRemovedPairingInformation` error. The app detects this
+  specifically (rather than retrying pairing 3x in a row, which is what
+  it used to do) and tells you to remove the device from **System
+  Settings → Bluetooth** and pair again from scratch.
 - Not code-signed or notarized; Gatekeeper may warn if you ever
   distribute the built binary outside of building it yourself.
 - The network handoff polls status every 2s rather than pushing updates

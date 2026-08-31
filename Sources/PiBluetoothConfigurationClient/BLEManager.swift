@@ -244,6 +244,20 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             return
         }
 
+        // The Mac has a stored bond for this Pi that the Pi's BlueZ no
+        // longer recognises (e.g. its /var/lib/bluetooth entry was
+        // removed/reset). Retrying will just fail identically every time
+        // with the same stale keys -- that's what turned one bad bond
+        // into a rapid-fire loop of pairing dialogs before this check
+        // existed. Surface it clearly instead and stop.
+        if let cbError = error as? CBError, cbError.code == .peerRemovedPairingInformation {
+            lastError = "This Mac's saved Bluetooth pairing with this Pi is no longer valid "
+                + "(the Pi no longer recognises it -- likely its bluetoothd pairing record was reset). "
+                + "Remove it from System Settings \u{2192} Bluetooth, then try connecting again."
+            resetConnectionState()
+            return
+        }
+
         // Unexpected disconnect, most commonly right after first-time
         // pairing/bonding completes -- BlueZ (and most BLE stacks) drop
         // the connection at that point and expect the central to
