@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var ble: BLEManager
     @State private var manualSSID: String = ""
     @State private var password: String = ""
+    @State private var ethernetIPField: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -14,10 +15,14 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             } else if !ble.isConnected {
                 deviceListSection
-            } else if ble.status.state == "connected" {
-                wifiConnectedSection
             } else {
-                wizardSection
+                if ble.status.state == "connected" {
+                    wifiConnectedSection
+                } else {
+                    wizardSection
+                }
+                Divider()
+                ethernetSection
             }
 
             if let info = ble.lastInfo {
@@ -212,6 +217,47 @@ struct ContentView: View {
             }
             .disabled((ssid.isEmpty ? manualSSID : ssid).isEmpty || ble.status.state == "connecting")
             .buttonStyle(.borderedProminent)
+        }
+    }
+
+    // MARK: - Ethernet direct-connect (independent of WiFi state)
+
+    private var ethernetSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ethernet Direct-Connect").font(.headline)
+            Text(ble.ethernetIP.isEmpty ? "Current: unknown" : "Current: \(ble.ethernetIP)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                TextField("Static IP, e.g. 192.168.4.1", text: $ethernetIPField)
+                    .frame(maxWidth: 220)
+                Button("Apply") {
+                    ble.setEthernetIP(ethernetIPField)
+                }
+                .disabled(!isValidIPv4(ethernetIPField))
+                Button("Reset to DHCP") {
+                    ble.clearEthernetIP()
+                }
+            }
+
+            Text("Gives eth0 a fixed IP and starts a DHCP server on it, so a laptop plugged directly into the Pi gets an address automatically. Applies immediately, no reboot.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // Mirrors the daemon's own is_valid_ipv4 (eth_control.hpp): 4
+    // dot-separated all-digit octets, each 0-255. Just a client-side
+    // sanity gate on the Apply button -- the daemon is the actual
+    // validation boundary.
+    private func isValidIPv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { part in
+            guard !part.isEmpty, part.count <= 3, part.allSatisfy(\.isNumber),
+                  let value = Int(part) else { return false }
+            return value >= 0 && value <= 255
         }
     }
 

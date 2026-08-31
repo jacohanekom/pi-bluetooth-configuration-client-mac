@@ -124,6 +124,18 @@ removes both `.build/` and the `.app`.
    shown once WiFi is actually connected: resetting only makes sense
    once there's something to reset.
 
+**Ethernet Direct-Connect** is a separate section shown below whichever
+WiFi view is active (the wizard or the connected details), since it's
+independent of WiFi/BLE state entirely. Type a static IP (e.g.
+`192.168.4.1`) and click **Apply** to give the Pi's `eth0` that fixed
+address and start a DHCP server scoped to it -- plug a laptop directly
+into the Pi with an ethernet cable and it gets an address automatically,
+no router needed. **Reset to DHCP** reverts `eth0` to normal DHCP client
+behaviour. Unlike WiFi changes, this applies immediately -- no reboot,
+no BLE disconnect. See the daemon's README, "Ethernet direct-connect",
+for why this exists (it also resolves the dual-homed routing confusion
+you get from having WiFi and Ethernet live on the same subnet at once).
+
 ## Protocol
 
 Talks directly to the GATT service documented in

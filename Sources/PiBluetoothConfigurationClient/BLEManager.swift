@@ -45,6 +45,7 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var status: WifiStatus = .idle
     @Published private(set) var scanResults: [WifiScanResult] = []
     @Published private(set) var wizardStep: WizardStep = .scanning
+    @Published private(set) var ethernetIP: String = ""
     @Published var lastError: String?
     @Published var lastInfo: String?
 
@@ -138,6 +139,19 @@ final class BLEManager: NSObject, ObservableObject {
         write("forget", to: GATT.commandUUID)
     }
 
+    /// Ethernet direct-connect is independent of WiFi/BLE state -- unlike
+    /// WiFi, applying it doesn't reboot the Pi (Ethernet doesn't share
+    /// the antenna with Bluetooth), so this doesn't touch
+    /// expectRebootDisconnect at all.
+    func setEthernetIP(_ ip: String) {
+        write(ip, to: GATT.ethernetIPUUID)
+        write("set_ethernet", to: GATT.commandUUID)
+    }
+
+    func clearEthernetIP() {
+        write("clear_ethernet", to: GATT.commandUUID)
+    }
+
     private func write(_ string: String, to uuid: CBUUID) {
         guard let peripheral, let characteristic = characteristics[uuid] else {
             lastError = "Not connected"
@@ -154,6 +168,7 @@ final class BLEManager: NSObject, ObservableObject {
         status = .idle
         scanResults = []
         wizardStep = .scanning
+        ethernetIP = ""
     }
 }
 
@@ -246,7 +261,9 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         }
         for characteristic in service.characteristics ?? [] {
             characteristics[characteristic.uuid] = characteristic
-            if characteristic.uuid == GATT.statusUUID || characteristic.uuid == GATT.scanResultsUUID {
+            if characteristic.uuid == GATT.statusUUID
+                || characteristic.uuid == GATT.scanResultsUUID
+                || characteristic.uuid == GATT.ethernetIPUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
                 peripheral.readValue(for: characteristic)
             }
@@ -280,6 +297,8 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     wizardStep = .pickNetwork
                 }
             }
+        case GATT.ethernetIPUUID:
+            ethernetIP = String(data: data, encoding: .utf8) ?? ""
         default:
             break
         }

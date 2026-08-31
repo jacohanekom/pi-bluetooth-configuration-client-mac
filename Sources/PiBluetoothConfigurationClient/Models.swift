@@ -11,8 +11,11 @@ enum GATT {
     static let commandUUID     = CBUUID(string: "7b1e0003-6a45-4d1f-9b0a-3c2f8e4d5a10")
     static let statusUUID      = CBUUID(string: "7b1e0004-6a45-4d1f-9b0a-3c2f8e4d5a10")
     static let scanResultsUUID = CBUUID(string: "7b1e0005-6a45-4d1f-9b0a-3c2f8e4d5a10")
+    static let ethernetIPUUID  = CBUUID(string: "7b1e0006-6a45-4d1f-9b0a-3c2f8e4d5a10")
 
-    static let allCharacteristicUUIDs = [ssidUUID, passwordUUID, commandUUID, statusUUID, scanResultsUUID]
+    static let allCharacteristicUUIDs = [
+        ssidUUID, passwordUUID, commandUUID, statusUUID, scanResultsUUID, ethernetIPUUID
+    ]
 }
 
 struct WifiStatus: Decodable, Equatable {
