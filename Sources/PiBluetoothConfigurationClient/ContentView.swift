@@ -220,9 +220,35 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Ethernet direct-connect (independent of WiFi state)
+    // MARK: - Ethernet direct-connect (eth0 is always a gateway; only
+    // configurable while WiFi isn't set up yet -- once WiFi is
+    // connected, the daemon itself rejects further changes, so this
+    // switches to a read-only display to match)
 
     private var ethernetSection: some View {
+        Group {
+            if ble.status.state == "connected" {
+                ethernetConnectedSection
+            } else {
+                ethernetEditableSection
+            }
+        }
+    }
+
+    private var ethernetConnectedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ethernet Gateway").font(.headline)
+            GroupBox("Ethernet") {
+                LabeledContent("IP address", value: ble.ethernetIP.isEmpty ? "unknown" : ble.ethernetIP)
+                    .padding(.top, 4)
+            }
+            Text("eth0 is serving DHCP on this address for direct-connect access. It's locked while WiFi is configured -- reset WiFi to make it editable again.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var ethernetEditableSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Ethernet Direct-Connect").font(.headline)
             Text(ble.ethernetIP.isEmpty ? "Current: unknown" : "Current: \(ble.ethernetIP)")
@@ -241,7 +267,7 @@ struct ContentView: View {
                 }
             }
 
-            Text("Gives eth0 a fixed IP and starts a DHCP server on it, so a laptop plugged directly into the Pi gets an address automatically. Applies immediately, no reboot.")
+            Text("eth0 already has a default gateway IP + DHCP server running so a laptop plugged in directly gets an address automatically. Change it here if you'd like a different one. Applies immediately, no reboot.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

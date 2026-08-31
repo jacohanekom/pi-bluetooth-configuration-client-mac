@@ -124,17 +124,22 @@ removes both `.build/` and the `.app`.
    shown once WiFi is actually connected: resetting only makes sense
    once there's something to reset.
 
-**Ethernet Direct-Connect** is a separate section shown below whichever
-WiFi view is active (the wizard or the connected details), since it's
-independent of WiFi/BLE state entirely. Type a static IP (e.g.
-`192.168.4.1`) and click **Apply** to give the Pi's `eth0` that fixed
-address and start a DHCP server scoped to it -- plug a laptop directly
-into the Pi with an ethernet cable and it gets an address automatically,
-no router needed. **Reset to DHCP** reverts `eth0` to normal DHCP client
-behaviour. Unlike WiFi changes, this applies immediately -- no reboot,
-no BLE disconnect. See the daemon's README, "Ethernet direct-connect",
-for why this exists (it also resolves the dual-homed routing confusion
-you get from having WiFi and Ethernet live on the same subnet at once).
+**Ethernet Gateway** is a separate section shown below whichever WiFi
+view is active. `eth0` is always a working gateway -- the Pi gives it a
+default static IP and starts a DHCP server on it the moment it first
+boots, no app interaction needed, so plugging a laptop directly into
+the Pi with an ethernet cable gets an address automatically from the
+start. **While WiFi isn't configured yet**, this section is editable:
+type a static IP (e.g. `192.168.4.1`) and click **Apply** to change it,
+or **Reset to DHCP** to revert `eth0` to normal DHCP client behaviour.
+Unlike WiFi changes, this applies immediately -- no reboot, no BLE
+disconnect. **Once WiFi is connected**, the section switches to a
+read-only display of the current gateway IP, mirroring the WiFi
+connected-details view -- the daemon itself rejects further Ethernet
+changes at that point (see the daemon's README, "Ethernet
+direct-connect", for why: it also resolves the dual-homed routing
+confusion you get from having WiFi and Ethernet live on the same subnet
+at once).
 
 ## Protocol
 
