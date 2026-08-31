@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var ble: BLEManager
-    @State private var ssid: String = ""
+    @State private var manualSSID: String = ""
     @State private var password: String = ""
 
     var body: some View {
@@ -17,7 +17,7 @@ struct ContentView: View {
             } else if ble.status.state == "connected" {
                 wifiConnectedSection
             } else {
-                configureSection
+                wizardSection
             }
 
             if let info = ble.lastInfo {
@@ -39,8 +39,6 @@ struct ContentView: View {
 
     private var header: some View {
         HStack {
-            Text("pi-bluetooth-configuration")
-                .font(.title2).bold()
             Spacer()
             if ble.isConnected {
                 Button("Disconnect") { ble.disconnect() }
@@ -48,10 +46,12 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Device list
+
     private var deviceListSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Nearby devices").font(.headline)
+                Text("Nearby Devices").font(.headline)
                 Spacer()
                 Button {
                     ble.startScan()
@@ -62,7 +62,7 @@ struct ContentView: View {
             }
 
             if ble.discoveredDevices.isEmpty {
-                Text("Scanning for pi-bluetooth-configuration devices…")
+                Text("Scanning for aipicam devices…")
                     .foregroundStyle(.secondary)
             }
 
@@ -73,6 +73,7 @@ struct ContentView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(device.name)
+                                .font(.system(.body, design: .monospaced))
                             Text("RSSI \(device.rssi) dBm")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -89,9 +90,8 @@ struct ContentView: View {
         }
     }
 
-    // Shown once the Pi reports its WiFi is actually connected -- the
-    // provisioning job is done at this point, so there's nothing left to
-    // configure, just the result and a way to undo it.
+    // MARK: - WiFi already configured
+
     private var wifiConnectedSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Connected to \(ble.connectedName ?? "device")")
@@ -109,61 +109,109 @@ struct ContentView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Button("Forget This Network") {
-                ble.sendCommand("forget")
+            Button("Reset") {
+                ble.resetNetwork()
             }
             .buttonStyle(.bordered)
         }
     }
 
-    // Shown before WiFi is connected: staging SSID/password, scanning,
-    // and live connect progress/failure feedback.
-    private var configureSection: some View {
+    // MARK: - Wizard (WiFi not yet configured)
+
+    private var wizardSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Connected to \(ble.connectedName ?? "device")")
                 .font(.headline)
 
-            statusBadge
+            switch ble.wizardStep {
+            case .scanning:
+                scanningStep
+            case .pickNetwork:
+                pickNetworkStep
+            case .enterPassword(let ssid):
+                enterPasswordStep(ssid: ssid)
+            }
+        }
+    }
 
-            GroupBox("WiFi network") {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("SSID", text: $ssid)
-                    SecureField("Password (leave blank for an open network)", text: $password)
+    private var scanningStep: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Scanning for networks…")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 160)
+    }
+
+    private var pickNetworkStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Choose a Network").font(.headline)
+                Spacer()
+                Button {
+                    ble.rescan()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Rescan")
+            }
+
+            if ble.scanResults.isEmpty {
+                Text("No networks found.")
+                    .foregroundStyle(.secondary)
+            }
+
+            List(ble.scanResults) { result in
+                Button {
+                    password = ""
+                    ble.selectNetwork(ssid: result.ssid)
+                } label: {
                     HStack {
-                        Button("Scan Networks") {
-                            ble.sendCommand("scan")
-                        }
+                        Text(result.ssid)
                         Spacer()
-                        Button("Connect") {
-                            ble.writeSSID(ssid)
-                            ble.writePassword(password)
-                            ble.sendCommand("connect")
-                        }
-                        .disabled(ssid.isEmpty)
-                        .buttonStyle(.borderedProminent)
+                        Text(result.security).foregroundStyle(.secondary)
+                        Text("\(result.rssi) dBm").foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, 4)
+                .buttonStyle(.plain)
+            }
+            .frame(minHeight: 180)
+
+            Button("Enter Network Manually") {
+                manualSSID = ""
+                password = ""
+                ble.selectNetwork(ssid: "")
+            }
+        }
+    }
+
+    private func enterPasswordStep(ssid: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button {
+                    ble.backToNetworkList()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Back")
+                Text(ssid.isEmpty ? "Enter Network" : ssid)
+                    .font(.headline)
             }
 
-            if !ble.scanResults.isEmpty {
-                GroupBox("Scan results (tap to fill in SSID)") {
-                    List(ble.scanResults) { result in
-                        Button {
-                            ssid = result.ssid
-                        } label: {
-                            HStack {
-                                Text(result.ssid)
-                                Spacer()
-                                Text(result.security).foregroundStyle(.secondary)
-                                Text("\(result.rssi) dBm").foregroundStyle(.secondary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .frame(minHeight: 140)
-                }
+            if ssid.isEmpty {
+                TextField("SSID", text: $manualSSID)
             }
+            SecureField("Password (leave blank for an open network)", text: $password)
+
+            if ble.status.state == "connecting" || ble.status.state == "failed" {
+                statusBadge
+            }
+
+            Button("Connect") {
+                ble.connectToNetwork(ssid: ssid.isEmpty ? manualSSID : ssid, password: password)
+            }
+            .disabled((ssid.isEmpty ? manualSSID : ssid).isEmpty || ble.status.state == "connecting")
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -180,8 +228,7 @@ struct ContentView: View {
 
     private var statusColor: Color {
         switch ble.status.state {
-        case "connected":  return .green
-        case "connecting", "scanning": return .yellow
+        case "connecting": return .yellow
         case "failed":     return .red
         default:           return .gray
         }
@@ -191,12 +238,10 @@ struct ContentView: View {
         switch ble.status.state {
         case "connecting":
             return "Connecting to \(ble.status.ssid)…"
-        case "scanning":
-            return "Scanning for networks…"
         case "failed":
             return "Failed: \(ble.status.error)"
         default:
-            return "Idle"
+            return ""
         }
     }
 }

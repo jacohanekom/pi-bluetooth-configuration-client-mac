@@ -1,20 +1,28 @@
 # pi-bluetooth-configuration-client-mac
 
-A small macOS app to configure WiFi on a Raspberry Pi running
+**aipicam configuration** -- a small macOS app to configure WiFi on a
+Raspberry Pi running
 [pi-bluetooth-configuration](https://github.com/jacohanekom/pi-bluetooth-configuration-alpine)
-over Bluetooth LE, using the Mac's own Bluetooth adapter. Scans for the
-Pi, connects (no pairing -- see Security below), lets you pick or type a
-network, and shows live connect status -- no SSH, no keyboard on the Pi.
+over Bluetooth LE, using the Mac's own Bluetooth adapter. The repo and
+underlying binary/bundle identifier keep their original names; "aipicam
+configuration" is the app's display name/branding (`CFBundleName` /
+`CFBundleDisplayName` in `Info.plist`) -- what shows in the Dock, window
+title bar, and About panel.
+
+Scans for nearby devices (shown by hardware serial number, so multiple
+units are distinguishable), connects (no pairing -- see Security below),
+walks through a short wizard to scan for and join a WiFi network, and
+shows live connect status -- no SSH, no keyboard on the Pi.
 
 Built with SwiftUI + CoreBluetooth, packaged with plain Swift Package
 Manager (no Xcode project).
 
 This is a one-shot provisioning flow, not a managed session: the Pi
-reboots itself a few seconds after a successful connect or a forget (see
+reboots itself a few seconds after a successful connect or a reset (see
 the daemon's README, "One-shot provisioning and reboot behavior"). This
 app doesn't try to keep managing anything over the network once that
 happens -- once the Pi reports its WiFi is connected, it just shows the
-network name and IP plus a **Forget** button, and treats the BLE
+network name and IP plus a **Reset** button, and treats the BLE
 disconnect that follows the reboot as expected, not an error.
 
 ## Security
@@ -87,28 +95,34 @@ removes both `.build/` and the `.app`.
 
 ## Using it
 
-1. Launch the app. It scans automatically for devices advertising
-   `pi-bluetooth-configuration`'s GATT service and lists them.
+1. Launch the app. It scans automatically for devices advertising the
+   WiFi-configuration GATT service and lists them by hardware serial
+   number.
 2. Click a device to connect -- no pairing step, connecting is enough
    (see Security above for what that trades away). If the link drops
    unexpectedly (the Pi 3's Bluetooth hardware has known stability
    issues independent of pairing), the app retries automatically (up to
    3 times, 1s apart) before surfacing an error.
-3. Optionally click **Scan Networks** and tap a result to fill in the
-   SSID field, or just type the SSID directly.
-4. Enter the password (leave blank for an open network) and click
-   **Connect**.
-5. Watch the status line -- it updates live via GATT notifications as
-   the Pi progresses through `connecting` → `connected` or `failed`
-   (with an error message).
-6. Once connected, the view switches to show the network name and IP
-   address, with a note that the Pi is about to reboot to finish
-   applying the change -- the BLE connection dropping a few seconds
+3. **If the Pi already has WiFi configured**, you land straight on a
+   details view: network name, IP address, and a **Reset** button. Skip
+   to step 7.
+4. **Otherwise**, a short wizard starts automatically:
+   - It scans for networks right away (spinner, no button to press).
+   - Pick one from the list, or **Enter Network Manually** for a hidden
+     network.
+5. Enter the password (leave blank for an open network) and click
+   **Connect**. A status line shows live progress
+   (`connecting` → `connected`/`failed`); on failure, edit and retry, or
+   **◀** back to the network list to try a different one.
+6. Once connected, the view switches to the same details screen as step
+   3 -- network name, IP, and a note that the Pi is about to reboot to
+   finish applying the change. The BLE connection dropping a few seconds
    later is expected, not an error.
-7. **Forget This Network** removes the network the Pi last configured
-   and reboots it the same way. It's only shown once WiFi is actually
-   connected, matching the daemon: forgetting only makes sense once
-   there's something to forget.
+7. **Reset** removes the network the Pi last configured and reboots it
+   the same way (this sends the same `forget` command the daemon's GATT
+   protocol always had -- "Reset" is just how this app labels it). Only
+   shown once WiFi is actually connected: resetting only makes sense
+   once there's something to reset.
 
 ## Protocol
 

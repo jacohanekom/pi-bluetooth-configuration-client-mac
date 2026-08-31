@@ -1,7 +1,17 @@
 import CoreBluetooth
 import Foundation
 
-/// Central-role BLE client for pi-bluetooth-configuration's GATT service.
+/// Which step of the connect-a-new-network wizard is showing. Only
+/// relevant while status.state isn't "connected" yet -- once it is,
+/// ContentView shows the connected-details view instead, regardless of
+/// this value.
+enum WizardStep: Equatable {
+    case scanning
+    case pickNetwork
+    case enterPassword(ssid: String)
+}
+
+/// Central-role BLE client for aipicam's WiFi-provisioning GATT service.
 ///
 /// No pairing/bonding: the peripheral's characteristics are plain
 /// read/write, not encrypted, so connecting is all that's needed -- see
@@ -10,7 +20,7 @@ import Foundation
 /// credentials cross BLE in the clear).
 ///
 /// This is a one-shot provisioning flow, not a managed session: the Pi
-/// reboots a few seconds after a successful "connect" or after "forget"
+/// reboots a few seconds after a successful "connect" or after "reset"
 /// (see that repo's README, "One-shot provisioning and reboot
 /// behavior"), so this client doesn't try to keep managing anything once
 /// either happens -- it just shows the result and treats the BLE
@@ -34,21 +44,25 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var connectedName: String?
     @Published private(set) var status: WifiStatus = .idle
     @Published private(set) var scanResults: [WifiScanResult] = []
+    @Published private(set) var wizardStep: WizardStep = .scanning
     @Published var lastError: String?
     @Published var lastInfo: String?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var characteristics: [CBUUID: CBCharacteristic] = [:]
-    private var stagedSSID = ""
-    private var stagedPassword = ""
 
     private var userInitiatedDisconnect = false
     // Set once we know the daemon is about to reboot (a successful
-    // connect, or a forget we just sent) -- the BLE disconnect that
+    // connect, or a reset we just sent) -- the BLE disconnect that
     // follows is expected, not a failure to retry against.
     private var expectRebootDisconnect = false
     private var reconnectAttempts = 0
+    // Kicks off exactly one automatic scan per connection, the moment we
+    // learn the Pi isn't already configured -- avoids re-scanning every
+    // time a Status notification happens to repeat the same "not
+    // connected yet" state.
+    private var hasAutoScanned = false
 
     override init() {
         super.init()
@@ -74,6 +88,8 @@ final class BLEManager: NSObject, ObservableObject {
         userInitiatedDisconnect = false
         expectRebootDisconnect = false
         reconnectAttempts = 0
+        hasAutoScanned = false
+        wizardStep = .scanning
         peripheral = device.peripheral
         peripheral?.delegate = self
         central.connect(device.peripheral, options: nil)
@@ -87,26 +103,39 @@ final class BLEManager: NSObject, ObservableObject {
         resetConnectionState()
     }
 
-    func writeSSID(_ ssid: String) {
-        stagedSSID = ssid
+    /// Rescans -- used both for the automatic first scan and a manual
+    /// "Rescan" action from the network-picker step.
+    func rescan() {
+        lastError = nil
+        wizardStep = .scanning
+        write("scan", to: GATT.commandUUID)
+    }
+
+    /// User tapped a network in the picker (or chose to enter one
+    /// manually, with an empty ssid) -- advance to the password step.
+    func selectNetwork(ssid: String) {
+        lastError = nil
+        wizardStep = .enterPassword(ssid: ssid)
+    }
+
+    func backToNetworkList() {
+        lastError = nil
+        wizardStep = .pickNetwork
+    }
+
+    func connectToNetwork(ssid: String, password: String) {
         write(ssid, to: GATT.ssidUUID)
-    }
-
-    func writePassword(_ password: String) {
-        stagedPassword = password
         write(password, to: GATT.passwordUUID)
+        write("connect", to: GATT.commandUUID)
     }
 
-    func sendCommand(_ command: String) {
-        if command == "forget" {
-            expectRebootDisconnect = true
-            lastInfo = "Forgetting network -- the Pi will reboot shortly."
-        }
-        write(command, to: GATT.commandUUID)
-    }
-
-    func refreshScanResults() {
-        readValue(GATT.scanResultsUUID)
+    // Labeled "Reset" in the UI; the wire command is still "forget" --
+    // that's the daemon's protocol (see pi-bluetooth-configuration-alpine's
+    // README), this is just how the Mac app presents it.
+    func resetNetwork() {
+        expectRebootDisconnect = true
+        lastInfo = "Resetting -- the Pi will reboot shortly."
+        write("forget", to: GATT.commandUUID)
     }
 
     private func write(_ string: String, to uuid: CBUUID) {
@@ -117,11 +146,6 @@ final class BLEManager: NSObject, ObservableObject {
         peripheral.writeValue(Data(string.utf8), for: characteristic, type: .withResponse)
     }
 
-    private func readValue(_ uuid: CBUUID) {
-        guard let peripheral, let characteristic = characteristics[uuid] else { return }
-        peripheral.readValue(for: characteristic)
-    }
-
     private func resetConnectionState() {
         isConnected = false
         isConnecting = false
@@ -129,6 +153,7 @@ final class BLEManager: NSObject, ObservableObject {
         characteristics.removeAll()
         status = .idle
         scanResults = []
+        wizardStep = .scanning
     }
 }
 
@@ -208,7 +233,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             return
         }
         guard let service = peripheral.services?.first(where: { $0.uuid == GATT.serviceUUID }) else {
-            lastError = "pi-bluetooth-configuration service not found"
+            lastError = "aipicam WiFi-configuration service not found"
             return
         }
         peripheral.discoverCharacteristics(GATT.allCharacteristicUUIDs, for: service)
@@ -243,11 +268,17 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     // The daemon reboots a few seconds after reporting
                     // this -- the BLE drop that follows is expected.
                     expectRebootDisconnect = true
+                } else if !hasAutoScanned {
+                    hasAutoScanned = true
+                    rescan()
                 }
             }
         case GATT.scanResultsUUID:
             if let decoded = try? JSONDecoder().decode([WifiScanResult].self, from: data) {
                 scanResults = decoded.sorted { $0.rssi > $1.rssi }
+                if wizardStep == .scanning {
+                    wizardStep = .pickNetwork
+                }
             }
         default:
             break

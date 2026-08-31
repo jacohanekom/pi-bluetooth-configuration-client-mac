@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Pi Bluetooth Config</string>
+    <string>aipicam configuration</string>
+    <key>CFBundleDisplayName</key>
+    <string>aipicam configuration</string>
     <key>CFBundleExecutable</key>
     <string>pi-bluetooth-configuration-client-mac</string>
     <key>CFBundleIdentifier</key>
@@ -15,7 +17,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Used to discover and configure a pi-bluetooth-configuration Raspberry Pi over Bluetooth LE.</string>
+    <string>Used to discover and configure an aipicam device's WiFi over Bluetooth LE.</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSPrincipalClass</key>
