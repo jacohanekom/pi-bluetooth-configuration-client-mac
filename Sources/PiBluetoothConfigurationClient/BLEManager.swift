@@ -4,10 +4,12 @@ import Foundation
 /// Central-role BLE client for pi-bluetooth-configuration's GATT service,
 /// with a handoff to NetworkControlClient once the Pi has an IP.
 ///
-/// Pairing itself isn't driven from here -- the peripheral marks every
-/// characteristic "encrypt-read"/"encrypt-write", so macOS's Bluetooth
-/// stack triggers pairing automatically the first time we touch one, the
-/// same way it would for any other encrypted GATT characteristic.
+/// No pairing/bonding: the peripheral's characteristics are plain
+/// read/write, not encrypted, so connecting is all that's needed -- see
+/// pi-bluetooth-configuration-alpine's README ("Security model") for why
+/// pairing was deliberately removed (bonding on the Pi 3's BCM43438 kept
+/// desyncing between BlueZ and the Mac in practice) and what that trades
+/// away (WiFi credentials cross BLE in the clear).
 ///
 /// The Pi 3's onboard Bluetooth shares an antenna with its WiFi radio, so
 /// BLE routinely drops once WiFi is actively passing traffic -- a
@@ -50,11 +52,12 @@ final class BLEManager: NSObject, ObservableObject {
     private var stagedSSID = ""
     private var stagedPassword = ""
 
-    // Many BLE stacks (BlueZ included) drop the connection right after
-    // completing pairing/bonding and expect the central to reconnect over
-    // the now-encrypted link -- that's a normal handshake step, not a
-    // failure, so an unexpected disconnect gets a few silent reconnect
-    // attempts before it's surfaced as an actual error.
+    // Transient link-level disconnects happen on this hardware even
+    // without pairing involved -- e.g. the Pi 3's BCM43438 occasionally
+    // drops the connection with HCI "Hardware Failure" (reason 0x03), a
+    // known instability in that chip. An unexpected disconnect gets a
+    // few silent reconnect attempts (reusing the connection, no bonding
+    // to redo) before it's surfaced as an actual error.
     private var userInitiatedDisconnect = false
     private var reconnectAttempts = 0
 
@@ -244,24 +247,8 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             return
         }
 
-        // The Mac has a stored bond for this Pi that the Pi's BlueZ no
-        // longer recognises (e.g. its /var/lib/bluetooth entry was
-        // removed/reset). Retrying will just fail identically every time
-        // with the same stale keys -- that's what turned one bad bond
-        // into a rapid-fire loop of pairing dialogs before this check
-        // existed. Surface it clearly instead and stop.
-        if let cbError = error as? CBError, cbError.code == .peerRemovedPairingInformation {
-            lastError = "This Mac's saved Bluetooth pairing with this Pi is no longer valid "
-                + "(the Pi no longer recognises it -- likely its bluetoothd pairing record was reset). "
-                + "Remove it from System Settings \u{2192} Bluetooth, then try connecting again."
-            resetConnectionState()
-            return
-        }
-
-        // Unexpected disconnect, most commonly right after first-time
-        // pairing/bonding completes -- BlueZ (and most BLE stacks) drop
-        // the connection at that point and expect the central to
-        // reconnect over the now-encrypted link. Retry a few times
+        // Unexpected disconnect (e.g. the BCM43438's Hardware Failure
+        // instability, or a transient RF issue) -- retry a few times
         // before treating it as an actual failure.
         if reconnectAttempts < Self.maxReconnectAttempts {
             reconnectAttempts += 1
@@ -298,9 +285,6 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         }
         for characteristic in service.characteristics ?? [] {
             characteristics[characteristic.uuid] = characteristic
-            // Reading/subscribing to these triggers macOS's pairing prompt
-            // on first access, since the peripheral requires an encrypted
-            // link for every characteristic in this service.
             if characteristic.uuid == GATT.statusUUID || characteristic.uuid == GATT.scanResultsUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
                 peripheral.readValue(for: characteristic)

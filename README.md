@@ -3,8 +3,8 @@
 A small macOS app to configure WiFi on a Raspberry Pi running
 [pi-bluetooth-configuration](https://github.com/jacohanekom/pi-bluetooth-configuration-alpine)
 over Bluetooth LE, using the Mac's own Bluetooth adapter. Scans for the
-Pi, pairs, lets you pick or type a network, and shows live connect status
--- no SSH, no keyboard on the Pi.
+Pi, connects (no pairing -- see Security below), lets you pick or type a
+network, and shows live connect status -- no SSH, no keyboard on the Pi.
 
 Built with SwiftUI + CoreBluetooth, packaged with plain Swift Package
 Manager (no Xcode project).
@@ -19,6 +19,17 @@ polling the Pi's plain TCP control interface on the LAN for everything
 else, and a subsequent BLE disconnect is treated as expected rather than
 an error. See `NetworkControlClient.swift` and the daemon's README
 ("WiFi/Bluetooth coexistence and the TCP handoff").
+
+## Security
+
+There is no pairing, encryption, or authentication anywhere in this
+flow -- not on the BLE service, not on the TCP handoff. WiFi SSID and
+password cross BLE in the clear to any device that connects while the
+Pi is advertising. This was a deliberate choice made after BLE
+pairing/bonding proved unreliable on the Pi 3's hardware (see the
+daemon's README, "Security model", for the full reasoning). Use this
+only on a trusted home/lab network, during a provisioning window you
+control.
 
 ## Requirements
 
@@ -82,30 +93,24 @@ removes both `.build/` and the `.app`.
 
 1. Launch the app. It scans automatically for devices advertising
    `pi-bluetooth-configuration`'s GATT service and lists them.
-2. Click a device to connect.
-3. The first read/write triggers macOS's normal Bluetooth pairing --
-   the Pi's agent uses "Just Works" pairing (`NoInputNoOutput`, since a
-   headless Pi has no display/keyboard), so there's no PIN to confirm;
-   macOS pairs and encrypts the link automatically. See the daemon's
-   README for what that trade-off does and doesn't protect against.
-   It's normal for BlueZ to drop the connection right as pairing
-   completes and expect a reconnect over the now-encrypted link -- the
-   app retries automatically (up to 3 times, 1s apart) and this
-   shouldn't be visible beyond a brief pause; it's only surfaced as an
-   error if all retries are exhausted.
-4. Optionally click **Scan Networks** and tap a result to fill in the
+2. Click a device to connect -- no pairing step, connecting is enough
+   (see Security above for what that trades away). If the link drops
+   unexpectedly (the Pi 3's Bluetooth hardware has known stability
+   issues independent of pairing), the app retries automatically (up to
+   3 times, 1s apart) before surfacing an error.
+3. Optionally click **Scan Networks** and tap a result to fill in the
    SSID field, or just type the SSID directly.
-5. Enter the password (leave blank for an open network) and click
+4. Enter the password (leave blank for an open network) and click
    **Connect**.
-6. Watch the status line -- it updates live via GATT notifications as
+5. Watch the status line -- it updates live via GATT notifications as
    the Pi progresses through `connecting` → `connected` (with the
    assigned IP) or `failed` (with an error message).
-7. Once `connected` with an IP shows up, the small badge above the
+6. Once `connected` with an IP shows up, the small badge above the
    status line switches from "Managing over Bluetooth" to "Managing
    over WiFi (ip)" -- the app has handed off to the Pi's TCP control
    interface at that point, polling it every 2s. A BLE disconnect after
    this point is normal (see above) and won't reset the UI.
-8. **Forget** clears whatever network the Pi last configured through
+7. **Forget** clears whatever network the Pi last configured through
    this daemon, over whichever channel (BLE or network) is currently
    active.
 
@@ -128,16 +133,7 @@ for both in full:
 - One connection at a time -- connecting to a new device disconnects
   the previous one (and tears down any active network handoff first).
 - No persisted list of previously-seen Pis; every launch re-scans.
-- Pairing/bonding state is entirely macOS's own Bluetooth stack's
-  business -- this app doesn't manage the system pairing list. If the
-  Pi's `bluetoothd` pairing record for this Mac ever gets reset (e.g.
-  `bluetoothctl remove <mac>` on the Pi, or a fresh install of the
-  daemon's dependencies), the Mac's side goes stale and every connection
-  attempt fails immediately with CoreBluetooth's
-  `peerRemovedPairingInformation` error. The app detects this
-  specifically (rather than retrying pairing 3x in a row, which is what
-  it used to do) and tells you to remove the device from **System
-  Settings → Bluetooth** and pair again from scratch.
+- No pairing/encryption at all -- see Security above.
 - Not code-signed or notarized; Gatekeeper may warn if you ever
   distribute the built binary outside of building it yourself.
 - The network handoff polls status every 2s rather than pushing updates
