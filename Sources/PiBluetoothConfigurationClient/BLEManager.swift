@@ -291,7 +291,8 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
 
         switch characteristic.uuid {
         case GATT.statusUUID:
-            if let decoded = try? JSONDecoder().decode(WifiStatus.self, from: data) {
+            do {
+                let decoded = try JSONDecoder().decode(WifiStatus.self, from: data)
                 status = decoded
                 if decoded.finished {
                     // Already fully provisioned -- nothing wizard-related
@@ -304,6 +305,11 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     hasAutoScanned = true
                     rescan()
                 }
+            } catch {
+                // A silent failure here would otherwise leave the wizard
+                // stuck (e.g. on the scanning spinner forever, since the
+                // first automatic scan is triggered from this decode).
+                lastError = "Couldn't read status from the Pi -- is its daemon up to date? (\(error.localizedDescription))"
             }
         case GATT.scanResultsUUID:
             if let decoded = try? JSONDecoder().decode([WifiScanResult].self, from: data) {
@@ -311,6 +317,8 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 if wizardStep == .scanning {
                     wizardStep = .pickNetwork
                 }
+            } else {
+                lastError = "Couldn't read scan results from the Pi -- is its daemon up to date?"
             }
         case GATT.ethernetIPUUID:
             if let value = String(data: data, encoding: .utf8), let decoded = EthernetConfig(wireValue: value) {

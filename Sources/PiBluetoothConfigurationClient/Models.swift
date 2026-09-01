@@ -28,9 +28,36 @@ struct WifiStatus: Decodable, Equatable {
     // (its "finish" command ran) -- a Pi that just joined WiFi but
     // hasn't been finished yet also reports state == "connected", so
     // this (not just state) is what decides wizard vs. final details.
+    //
+    // Decoded leniently (defaulting to false): a Pi still running a
+    // daemon build from before this field existed would otherwise fail
+    // this whole decode and silently stall the wizard (no "finished"
+    // key -> decode throws -> the app never processes the status update
+    // at all, e.g. never triggers the first automatic network scan).
     var finished: Bool
 
     static let idle = WifiStatus(state: "idle", ssid: "", ip: "", error: "", finished: false)
+
+    init(state: String, ssid: String, ip: String, error: String, finished: Bool) {
+        self.state = state
+        self.ssid = ssid
+        self.ip = ip
+        self.error = error
+        self.finished = finished
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decode(String.self, forKey: .state)
+        ssid = try c.decode(String.self, forKey: .ssid)
+        ip = try c.decode(String.self, forKey: .ip)
+        error = try c.decode(String.self, forKey: .error)
+        finished = try c.decodeIfPresent(Bool.self, forKey: .finished) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state, ssid, ip, error, finished
+    }
 }
 
 struct WifiScanResult: Decodable, Equatable, Identifiable {
