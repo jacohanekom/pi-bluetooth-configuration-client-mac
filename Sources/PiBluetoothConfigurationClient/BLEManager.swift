@@ -1,14 +1,17 @@
 import CoreBluetooth
 import Foundation
 
-/// Which step of the connect-a-new-network wizard is showing. Only
-/// relevant while status.state isn't "connected" yet -- once it is,
-/// ContentView shows the connected-details view instead, regardless of
-/// this value.
+/// Which step of the setup wizard is showing. Only relevant while
+/// status.finished is false -- once it's true, ContentView shows the
+/// final connected-details view instead, regardless of this value.
 enum WizardStep: Equatable {
     case scanning
     case pickNetwork
     case enterPassword(ssid: String)
+    // WiFi joined but the wizard hasn't been finished yet -- eth0's
+    // gateway IP/DHCP range can still be customized here before
+    // finishSetup() sends "finish" and the Pi reboots.
+    case localNetworkConfig
 }
 
 /// Central-role BLE client for aipicam's WiFi-provisioning GATT service.
@@ -20,11 +23,11 @@ enum WizardStep: Equatable {
 /// credentials cross BLE in the clear).
 ///
 /// This is a one-shot provisioning flow, not a managed session: the Pi
-/// reboots a few seconds after a successful "connect" or after "reset"
-/// (see that repo's README, "One-shot provisioning and reboot
-/// behavior"), so this client doesn't try to keep managing anything once
-/// either happens -- it just shows the result and treats the BLE
-/// disconnect that follows as expected, not an error.
+/// reboots a few seconds after "finish" or after "reset" (see that
+/// repo's README, "One-shot provisioning and reboot behavior"), so this
+/// client doesn't try to keep managing anything once either happens --
+/// it just shows the result and treats the BLE disconnect that follows
+/// as expected, not an error.
 @MainActor
 final class BLEManager: NSObject, ObservableObject {
     struct DiscoveredDevice: Identifiable {
@@ -45,7 +48,8 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var status: WifiStatus = .idle
     @Published private(set) var scanResults: [WifiScanResult] = []
     @Published private(set) var wizardStep: WizardStep = .scanning
-    @Published private(set) var ethernetIP: String = ""
+    @Published private(set) var ethernetConfig: EthernetConfig = .unknown
+    @Published private(set) var dhcpLeases: [DhcpLease] = []
     @Published var lastError: String?
     @Published var lastInfo: String?
 
@@ -55,7 +59,7 @@ final class BLEManager: NSObject, ObservableObject {
 
     private var userInitiatedDisconnect = false
     // Set once we know the daemon is about to reboot (a successful
-    // connect, or a reset we just sent) -- the BLE disconnect that
+    // "finish", or a reset we just sent) -- the BLE disconnect that
     // follows is expected, not a failure to retry against.
     private var expectRebootDisconnect = false
     private var reconnectAttempts = 0
@@ -139,17 +143,23 @@ final class BLEManager: NSObject, ObservableObject {
         write("forget", to: GATT.commandUUID)
     }
 
-    /// Ethernet direct-connect is independent of WiFi/BLE state -- unlike
-    /// WiFi, applying it doesn't reboot the Pi (Ethernet doesn't share
-    /// the antenna with Bluetooth), so this doesn't touch
-    /// expectRebootDisconnect at all.
-    func setEthernetIP(_ ip: String) {
-        write(ip, to: GATT.ethernetIPUUID)
+    /// Local network (Ethernet gateway) configuration -- only takes
+    /// effect on the daemon while the wizard hasn't been finished yet.
+    /// Doesn't reboot the Pi by itself (Ethernet doesn't share the
+    /// antenna with Bluetooth), so this doesn't touch
+    /// expectRebootDisconnect.
+    func setLocalNetworkConfig(ip: String, rangeStart: Int, rangeEnd: Int) {
+        write(EthernetConfig(ip: ip, rangeStart: rangeStart, rangeEnd: rangeEnd).wireValue, to: GATT.ethernetIPUUID)
         write("set_ethernet", to: GATT.commandUUID)
     }
 
-    func clearEthernetIP() {
-        write("clear_ethernet", to: GATT.commandUUID)
+    /// Concludes the setup wizard -- the daemon creates its marker file
+    /// and reboots a few seconds later. Only meaningful once WiFi is
+    /// actually connected; the UI only offers this button at that point.
+    func finishSetup() {
+        expectRebootDisconnect = true
+        lastInfo = "Finishing setup -- the Pi will reboot shortly."
+        write("finish", to: GATT.commandUUID)
     }
 
     private func write(_ string: String, to uuid: CBUUID) {
@@ -168,7 +178,8 @@ final class BLEManager: NSObject, ObservableObject {
         status = .idle
         scanResults = []
         wizardStep = .scanning
-        ethernetIP = ""
+        ethernetConfig = .unknown
+        dhcpLeases = []
     }
 }
 
@@ -263,7 +274,8 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             characteristics[characteristic.uuid] = characteristic
             if characteristic.uuid == GATT.statusUUID
                 || characteristic.uuid == GATT.scanResultsUUID
-                || characteristic.uuid == GATT.ethernetIPUUID {
+                || characteristic.uuid == GATT.ethernetIPUUID
+                || characteristic.uuid == GATT.leasesUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
                 peripheral.readValue(for: characteristic)
             }
@@ -281,10 +293,13 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         case GATT.statusUUID:
             if let decoded = try? JSONDecoder().decode(WifiStatus.self, from: data) {
                 status = decoded
-                if decoded.state == "connected" {
-                    // The daemon reboots a few seconds after reporting
-                    // this -- the BLE drop that follows is expected.
-                    expectRebootDisconnect = true
+                if decoded.finished {
+                    // Already fully provisioned -- nothing wizard-related
+                    // to do, ContentView shows the final details screen.
+                } else if decoded.state == "connected" {
+                    // WiFi just joined but "finish" hasn't been sent yet --
+                    // move to the local network configuration step.
+                    wizardStep = .localNetworkConfig
                 } else if !hasAutoScanned {
                     hasAutoScanned = true
                     rescan()
@@ -298,7 +313,13 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 }
             }
         case GATT.ethernetIPUUID:
-            ethernetIP = String(data: data, encoding: .utf8) ?? ""
+            if let value = String(data: data, encoding: .utf8), let decoded = EthernetConfig(wireValue: value) {
+                ethernetConfig = decoded
+            }
+        case GATT.leasesUUID:
+            if let decoded = try? JSONDecoder().decode([DhcpLease].self, from: data) {
+                dhcpLeases = decoded
+            }
         default:
             break
         }

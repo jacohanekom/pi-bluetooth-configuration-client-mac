@@ -4,7 +4,9 @@ struct ContentView: View {
     @EnvironmentObject var ble: BLEManager
     @State private var manualSSID: String = ""
     @State private var password: String = ""
-    @State private var ethernetIPField: String = ""
+    @State private var localIPField: String = ""
+    @State private var rangeStartField: String = ""
+    @State private var rangeEndField: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -15,14 +17,10 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             } else if !ble.isConnected {
                 deviceListSection
+            } else if ble.status.finished {
+                connectedDetailsSection
             } else {
-                if ble.status.state == "connected" {
-                    wifiConnectedSection
-                } else {
-                    wizardSection
-                }
-                Divider()
-                ethernetSection
+                wizardSection
             }
 
             if let info = ble.lastInfo {
@@ -95,9 +93,9 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - WiFi already configured
+    // MARK: - Setup finished: WiFi + Local Network details
 
-    private var wifiConnectedSection: some View {
+    private var connectedDetailsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Connected to \(ble.connectedName ?? "device")")
                 .font(.headline)
@@ -110,9 +108,22 @@ struct ContentView: View {
                 .padding(.top, 4)
             }
 
-            Text("The Pi will reboot shortly to finish applying this. The Bluetooth connection will drop when it does -- that's expected.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            GroupBox("Local Network") {
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent("Gateway IP", value: ble.ethernetConfig.ip)
+                    LabeledContent("DHCP range", value: "\(rangeAddress(ble.ethernetConfig.rangeStart)) – \(rangeAddress(ble.ethernetConfig.rangeEnd))")
+                    if ble.dhcpLeases.isEmpty {
+                        Text("No devices connected")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(ble.dhcpLeases) { lease in
+                            LabeledContent(lease.hostname.isEmpty ? lease.mac : lease.hostname, value: lease.ip)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
 
             Button("Reset") {
                 ble.resetNetwork()
@@ -121,7 +132,13 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Wizard (WiFi not yet configured)
+    private func rangeAddress(_ lastOctet: Int) -> String {
+        let ip = ble.ethernetConfig.ip
+        guard let dot = ip.lastIndex(of: ".") else { return "\(lastOctet)" }
+        return "\(ip[ip.startIndex..<dot]).\(lastOctet)"
+    }
+
+    // MARK: - Wizard (WiFi not yet configured, or configured but not finished)
 
     private var wizardSection: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -135,6 +152,8 @@ struct ContentView: View {
                 pickNetworkStep
             case .enterPassword(let ssid):
                 enterPasswordStep(ssid: ssid)
+            case .localNetworkConfig:
+                localNetworkConfigStep
             }
         }
     }
@@ -220,62 +239,48 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Ethernet direct-connect (eth0 is always a gateway; only
-    // configurable while WiFi isn't set up yet -- once WiFi is
-    // connected, the daemon itself rejects further changes, so this
-    // switches to a read-only display to match)
+    // MARK: - Local network configuration (last wizard step, after WiFi joins)
 
-    private var ethernetSection: some View {
-        Group {
-            if ble.status.state == "connected" {
-                ethernetConnectedSection
-            } else {
-                ethernetEditableSection
-            }
-        }
-    }
-
-    private var ethernetConnectedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Ethernet Gateway").font(.headline)
-            GroupBox("Ethernet") {
-                LabeledContent("IP address", value: ble.ethernetIP.isEmpty ? "unknown" : ble.ethernetIP)
-                    .padding(.top, 4)
-            }
-            Text("eth0 is serving DHCP on this address for direct-connect access. It's locked while WiFi is configured -- reset WiFi to make it editable again.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var ethernetEditableSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Ethernet Direct-Connect").font(.headline)
-            Text(ble.ethernetIP.isEmpty ? "Current: unknown" : "Current: \(ble.ethernetIP)")
+    private var localNetworkConfigStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Local Network Configuration").font(.headline)
+            Text("eth0 already has a working gateway IP and DHCP server. Adjust it here if you'd like, or just continue.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
             HStack {
-                TextField("Static IP, e.g. 192.168.4.1", text: $ethernetIPField)
-                    .frame(maxWidth: 220)
-                Button("Apply") {
-                    ble.setEthernetIP(ethernetIPField)
-                }
-                .disabled(!isValidIPv4(ethernetIPField))
-                Button("Reset to DHCP") {
-                    ble.clearEthernetIP()
-                }
+                Text("IP address").frame(width: 90, alignment: .leading)
+                TextField("192.168.4.1", text: $localIPField)
+                    .frame(maxWidth: 160)
+            }
+            HStack {
+                Text("DHCP range").frame(width: 90, alignment: .leading)
+                TextField("2", text: $rangeStartField)
+                    .frame(maxWidth: 50)
+                Text("–")
+                TextField("200", text: $rangeEndField)
+                    .frame(maxWidth: 50)
             }
 
-            Text("eth0 already has a default gateway IP + DHCP server running so a laptop plugged in directly gets an address automatically. Change it here if you'd like a different one. Applies immediately, no reboot.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Button("Finish") {
+                let start = Int(rangeStartField) ?? ble.ethernetConfig.rangeStart
+                let end = Int(rangeEndField) ?? ble.ethernetConfig.rangeEnd
+                ble.setLocalNetworkConfig(ip: localIPField, rangeStart: start, rangeEnd: end)
+                ble.finishSetup()
+            }
+            .disabled(!isValidIPv4(localIPField) || Int(rangeStartField) == nil || Int(rangeEndField) == nil)
+            .buttonStyle(.borderedProminent)
+        }
+        .onAppear {
+            if localIPField.isEmpty { localIPField = ble.ethernetConfig.ip }
+            if rangeStartField.isEmpty { rangeStartField = String(ble.ethernetConfig.rangeStart) }
+            if rangeEndField.isEmpty { rangeEndField = String(ble.ethernetConfig.rangeEnd) }
         }
     }
 
     // Mirrors the daemon's own is_valid_ipv4 (eth_control.hpp): 4
     // dot-separated all-digit octets, each 0-255. Just a client-side
-    // sanity gate on the Apply button -- the daemon is the actual
+    // sanity gate on the Finish button -- the daemon is the actual
     // validation boundary.
     private func isValidIPv4(_ s: String) -> Bool {
         let parts = s.split(separator: ".", omittingEmptySubsequences: false)

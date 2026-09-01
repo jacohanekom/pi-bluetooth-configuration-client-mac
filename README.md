@@ -11,19 +11,20 @@ title bar, and About panel.
 
 Scans for nearby devices (shown by hardware serial number, so multiple
 units are distinguishable), connects (no pairing -- see Security below),
-walks through a short wizard to scan for and join a WiFi network, and
-shows live connect status -- no SSH, no keyboard on the Pi.
+and walks through a wizard: pick a WiFi network, enter its password,
+confirm eth0's local network (gateway IP + DHCP range), then finish --
+no SSH, no keyboard on the Pi.
 
 Built with SwiftUI + CoreBluetooth, packaged with plain Swift Package
 Manager (no Xcode project).
 
 This is a one-shot provisioning flow, not a managed session: the Pi
-reboots itself a few seconds after a successful connect or a reset (see
-the daemon's README, "One-shot provisioning and reboot behavior"). This
-app doesn't try to keep managing anything over the network once that
-happens -- once the Pi reports its WiFi is connected, it just shows the
-network name and IP plus a **Reset** button, and treats the BLE
-disconnect that follows the reboot as expected, not an error.
+reboots itself a few seconds after **Finish** or a reset (see the
+daemon's README, "One-shot provisioning and reboot behavior"). This app
+doesn't try to keep managing anything over the network once that
+happens -- once setup is finished, it just shows the WiFi and local
+network details plus a **Reset** button, and treats the BLE disconnect
+that follows the reboot as expected, not an error.
 
 ## Security
 
@@ -103,10 +104,11 @@ removes both `.build/` and the `.app`.
    unexpectedly (the Pi 3's Bluetooth hardware has known stability
    issues independent of pairing), the app retries automatically (up to
    3 times, 1s apart) before surfacing an error.
-3. **If the Pi already has WiFi configured**, you land straight on a
-   details view: network name, IP address, and a **Reset** button. Skip
-   to step 7.
-4. **Otherwise**, a short wizard starts automatically:
+3. **If setup already finished on this Pi**, you land straight on the
+   details view: WiFi network/IP, the local network's gateway IP + DHCP
+   range, whatever's currently allocated to devices plugged into
+   `eth0`, and a **Reset** button. Skip to step 8.
+4. **Otherwise**, a wizard starts automatically:
    - It scans for networks right away (spinner, no button to press).
    - Pick one from the list, or **Enter Network Manually** for a hidden
      network.
@@ -114,32 +116,21 @@ removes both `.build/` and the `.app`.
    **Connect**. A status line shows live progress
    (`connecting` → `connected`/`failed`); on failure, edit and retry, or
    **◀** back to the network list to try a different one.
-6. Once connected, the view switches to the same details screen as step
-   3 -- network name, IP, and a note that the Pi is about to reboot to
-   finish applying the change. The BLE connection dropping a few seconds
-   later is expected, not an error.
-7. **Reset** removes the network the Pi last configured and reboots it
+6. Once WiFi joins, the wizard moves to **Local Network Configuration**:
+   `eth0` already has a working gateway IP and DHCP server (it's always
+   on, from the moment the Pi first boots -- see the daemon's README,
+   "Ethernet direct-connect"), prefilled here so you can just confirm
+   it, or change the IP/DHCP range if you'd like something different.
+7. Click **Finish**. This is what actually concludes setup and reboots
+   the Pi a few seconds later -- the BLE connection dropping is
+   expected, not an error. Reconnecting afterward lands on the details
+   view from step 3.
+8. **Reset** removes the network the Pi last configured and reboots it
    the same way (this sends the same `forget` command the daemon's GATT
    protocol always had -- "Reset" is just how this app labels it). Only
-   shown once WiFi is actually connected: resetting only makes sense
-   once there's something to reset.
-
-**Ethernet Gateway** is a separate section shown below whichever WiFi
-view is active. `eth0` is always a working gateway -- the Pi gives it a
-default static IP and starts a DHCP server on it the moment it first
-boots, no app interaction needed, so plugging a laptop directly into
-the Pi with an ethernet cable gets an address automatically from the
-start. **While WiFi isn't configured yet**, this section is editable:
-type a static IP (e.g. `192.168.4.1`) and click **Apply** to change it,
-or **Reset to DHCP** to revert `eth0` to normal DHCP client behaviour.
-Unlike WiFi changes, this applies immediately -- no reboot, no BLE
-disconnect. **Once WiFi is connected**, the section switches to a
-read-only display of the current gateway IP, mirroring the WiFi
-connected-details view -- the daemon itself rejects further Ethernet
-changes at that point (see the daemon's README, "Ethernet
-direct-connect", for why: it also resolves the dual-homed routing
-confusion you get from having WiFi and Ethernet live on the same subnet
-at once).
+   shown once setup has finished: resetting only makes sense once
+   there's something to reset. Local network settings aren't touched by
+   Reset and become editable again once the wizard restarts.
 
 ## Protocol
 
