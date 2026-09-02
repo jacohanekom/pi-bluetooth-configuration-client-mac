@@ -131,6 +131,13 @@ removes both `.build/` and the `.app`.
    shown once setup has finished: resetting only makes sense once
    there's something to reset. Local network settings aren't touched by
    Reset and become editable again once the wizard restarts.
+9. If the Pi has any relays configured (see the daemon's README, "Relay
+   control" -- an optional integration with
+   [pi-relay-control-alpine](https://github.com/jacohanekom/pi-relay-control-alpine)),
+   a **Relays** section appears on the details view with one toggle
+   switch per relay. A switch is disabled while that relay's state reads
+   as unknown (pi-relay-control-alpine not reachable on the configured
+   port). No relays configured means no section at all.
 
 ## Protocol
 

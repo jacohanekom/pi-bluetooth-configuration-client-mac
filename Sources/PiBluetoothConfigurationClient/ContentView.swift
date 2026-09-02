@@ -125,10 +125,34 @@ struct ContentView: View {
                 .padding(.top, 4)
             }
 
+            if !ble.relays.isEmpty {
+                relaysSection
+            }
+
             Button("Reset") {
                 ble.resetNetwork()
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    // MARK: - Relays (pi-relay-control-alpine, via pi-bluetooth-configuration)
+
+    private var relaysSection: some View {
+        GroupBox("Relays") {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(ble.relays) { relay in
+                    Toggle(isOn: Binding(
+                        get: { relay.isOn },
+                        set: { ble.setRelay(port: relay.port, on: $0) }
+                    )) {
+                        Text(relay.label)
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(relay.state == "unknown")
+                }
+            }
+            .padding(.top, 4)
         }
     }
 

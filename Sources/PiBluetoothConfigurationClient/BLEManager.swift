@@ -50,6 +50,7 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var wizardStep: WizardStep = .scanning
     @Published private(set) var ethernetConfig: EthernetConfig = .unknown
     @Published private(set) var dhcpLeases: [DhcpLease] = []
+    @Published private(set) var relays: [RelayState] = []
     @Published var lastError: String?
     @Published var lastInfo: String?
 
@@ -153,6 +154,15 @@ final class BLEManager: NSObject, ObservableObject {
         write("set_ethernet", to: GATT.commandUUID)
     }
 
+    /// Toggles a relay pi-bluetooth-configuration forwards to
+    /// pi-relay-control-alpine on the Pi's behalf -- see that repo's
+    /// README, "Relay control". Unlike the wizard commands, this isn't
+    /// gated by wizard step or `finished`; it's available any time a
+    /// relay shows up in `relays` at all.
+    func setRelay(port: Int, on: Bool) {
+        write("relay \(port) \(on ? "on" : "off")", to: GATT.commandUUID)
+    }
+
     /// Concludes the setup wizard -- the daemon creates its marker file
     /// and reboots a few seconds later. Only meaningful once WiFi is
     /// actually connected; the UI only offers this button at that point.
@@ -180,6 +190,7 @@ final class BLEManager: NSObject, ObservableObject {
         wizardStep = .scanning
         ethernetConfig = .unknown
         dhcpLeases = []
+        relays = []
     }
 }
 
@@ -275,7 +286,8 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             if characteristic.uuid == GATT.statusUUID
                 || characteristic.uuid == GATT.scanResultsUUID
                 || characteristic.uuid == GATT.ethernetIPUUID
-                || characteristic.uuid == GATT.leasesUUID {
+                || characteristic.uuid == GATT.leasesUUID
+                || characteristic.uuid == GATT.relaysUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
                 peripheral.readValue(for: characteristic)
             }
@@ -327,6 +339,10 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         case GATT.leasesUUID:
             if let decoded = try? JSONDecoder().decode([DhcpLease].self, from: data) {
                 dhcpLeases = decoded
+            }
+        case GATT.relaysUUID:
+            if let decoded = try? JSONDecoder().decode([RelayState].self, from: data) {
+                relays = decoded
             }
         default:
             break

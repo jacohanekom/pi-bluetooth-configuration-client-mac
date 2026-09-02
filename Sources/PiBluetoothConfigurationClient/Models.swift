@@ -13,9 +13,10 @@ enum GATT {
     static let scanResultsUUID = CBUUID(string: "7b1e0005-6a45-4d1f-9b0a-3c2f8e4d5a10")
     static let ethernetIPUUID  = CBUUID(string: "7b1e0006-6a45-4d1f-9b0a-3c2f8e4d5a10")
     static let leasesUUID      = CBUUID(string: "7b1e0007-6a45-4d1f-9b0a-3c2f8e4d5a10")
+    static let relaysUUID      = CBUUID(string: "7b1e0008-6a45-4d1f-9b0a-3c2f8e4d5a10")
 
     static let allCharacteristicUUIDs = [
-        ssidUUID, passwordUUID, commandUUID, statusUUID, scanResultsUUID, ethernetIPUUID, leasesUUID
+        ssidUUID, passwordUUID, commandUUID, statusUUID, scanResultsUUID, ethernetIPUUID, leasesUUID, relaysUUID
     ]
 }
 
@@ -101,4 +102,17 @@ struct DhcpLease: Decodable, Equatable, Identifiable {
     var hostname: String
 
     var id: String { ip }
+}
+
+/// One relay pi-bluetooth-configuration forwards on/off/status to on
+/// pi-relay-control-alpine's behalf -- see that repo's README, "Relay
+/// control". `state` is "on", "off", or "unknown" (pi-relay-control-alpine
+/// unreachable on that port).
+struct RelayState: Decodable, Equatable, Identifiable {
+    var port: Int
+    var label: String
+    var state: String
+
+    var id: Int { port }
+    var isOn: Bool { state == "on" }
 }
