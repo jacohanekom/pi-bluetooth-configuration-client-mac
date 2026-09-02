@@ -22,9 +22,11 @@ This is a one-shot provisioning flow, not a managed session: the Pi
 reboots itself a few seconds after **Finish** or a reset (see the
 daemon's README, "One-shot provisioning and reboot behavior"). This app
 doesn't try to keep managing anything over the network once that
-happens -- once setup is finished, it just shows the WiFi and local
-network details plus a **Reset** button, and treats the BLE disconnect
-that follows the reboot as expected, not an error.
+happens -- once setup is finished, it shows a details screen instead of
+the wizard, organized into three collapsible sections (**Connectivity**,
+**Relays**, **Solar/Battery Information**) plus a **Reset** button, and
+treats the BLE disconnect that follows the reboot as expected, not an
+error.
 
 ## Security
 
@@ -105,9 +107,7 @@ removes both `.build/` and the `.app`.
    issues independent of pairing), the app retries automatically (up to
    3 times, 1s apart) before surfacing an error.
 3. **If setup already finished on this Pi**, you land straight on the
-   details view: WiFi network/IP, the local network's gateway IP + DHCP
-   range, whatever's currently allocated to devices plugged into
-   `eth0`, and a **Reset** button. Skip to step 8.
+   details screen (see step 9 below for what's on it). Skip to step 8.
 4. **Otherwise**, a wizard starts automatically:
    - It scans for networks right away (spinner, no button to press).
    - Pick one from the list, or **Enter Network Manually** for a hidden
@@ -124,20 +124,38 @@ removes both `.build/` and the `.app`.
 7. Click **Finish**. This is what actually concludes setup and reboots
    the Pi a few seconds later -- the BLE connection dropping is
    expected, not an error. Reconnecting afterward lands on the details
-   view from step 3.
+   screen described next.
 8. **Reset** removes the network the Pi last configured and reboots it
    the same way (this sends the same `forget` command the daemon's GATT
    protocol always had -- "Reset" is just how this app labels it). Only
    shown once setup has finished: resetting only makes sense once
    there's something to reset. Local network settings aren't touched by
    Reset and become editable again once the wizard restarts.
-9. If the Pi has any relays configured (see the daemon's README, "Relay
-   control" -- an optional integration with
-   [pi-relay-control-alpine](https://github.com/jacohanekom/pi-relay-control-alpine)),
-   a **Relays** section appears on the details view with one toggle
-   switch per relay. A switch is disabled while that relay's state reads
-   as unknown (pi-relay-control-alpine not reachable on the configured
-   port). No relays configured means no section at all.
+9. The post-setup details screen has three collapsible sections (tap
+   each to expand/collapse -- **Connectivity** starts open, the other
+   two start collapsed since there's a lot to show across all three):
+   - **Connectivity**: WiFi network/IP, and the local network's gateway
+     IP + DHCP range plus whatever's currently allocated to devices
+     plugged into `eth0`.
+   - **Relays**: one toggle switch per relay, if any are configured
+     (see the daemon's README, "Relay control" -- an optional
+     integration with
+     [pi-relay-control-alpine](https://github.com/jacohanekom/pi-relay-control-alpine)).
+     A switch is disabled while that relay's state reads as unknown
+     (pi-relay-control-alpine not reachable on the configured port).
+     Shows "No relays configured" if `[relays]` is empty.
+   - **Solar/Battery Information**: the latest reading from a Victron
+     MPPT solar charger, if one's connected (see the daemon's README,
+     "Victron solar/battery telemetry" -- an optional integration with
+     [victron-ve-direct-alpine](https://github.com/jacohanekom/victron-ve-direct-alpine)):
+     device name/serial, battery voltage, battery current (labeled
+     charging/discharging/idle, since the raw sign isn't obvious at a
+     glance), solar voltage/input power, charge state, error, and yield
+     today. Shows "No Victron device connected" if nothing's reachable.
+     (State of charge / time to go aren't shown -- those only exist on
+     battery monitors, not the MPPT chargers this integration targets.
+     Load output isn't shown either -- not every MPPT has one, and it's
+     always "ON" on this integration's hardware.)
 
 ## Protocol
 

@@ -51,6 +51,7 @@ final class BLEManager: NSObject, ObservableObject {
     @Published private(set) var ethernetConfig: EthernetConfig = .unknown
     @Published private(set) var dhcpLeases: [DhcpLease] = []
     @Published private(set) var relays: [RelayState] = []
+    @Published private(set) var victronStatus: VictronStatus = .disconnected
     @Published var lastError: String?
     @Published var lastInfo: String?
 
@@ -191,6 +192,7 @@ final class BLEManager: NSObject, ObservableObject {
         ethernetConfig = .unknown
         dhcpLeases = []
         relays = []
+        victronStatus = .disconnected
     }
 }
 
@@ -287,7 +289,8 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 || characteristic.uuid == GATT.scanResultsUUID
                 || characteristic.uuid == GATT.ethernetIPUUID
                 || characteristic.uuid == GATT.leasesUUID
-                || characteristic.uuid == GATT.relaysUUID {
+                || characteristic.uuid == GATT.relaysUUID
+                || characteristic.uuid == GATT.victronUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
                 peripheral.readValue(for: characteristic)
             }
@@ -343,6 +346,10 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         case GATT.relaysUUID:
             if let decoded = try? JSONDecoder().decode([RelayState].self, from: data) {
                 relays = decoded
+            }
+        case GATT.victronUUID:
+            if let decoded = try? JSONDecoder().decode(VictronStatus.self, from: data) {
+                victronStatus = decoded
             }
         default:
             break

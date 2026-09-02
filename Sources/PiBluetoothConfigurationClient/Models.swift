@@ -14,9 +14,11 @@ enum GATT {
     static let ethernetIPUUID  = CBUUID(string: "7b1e0006-6a45-4d1f-9b0a-3c2f8e4d5a10")
     static let leasesUUID      = CBUUID(string: "7b1e0007-6a45-4d1f-9b0a-3c2f8e4d5a10")
     static let relaysUUID      = CBUUID(string: "7b1e0008-6a45-4d1f-9b0a-3c2f8e4d5a10")
+    static let victronUUID     = CBUUID(string: "7b1e0009-6a45-4d1f-9b0a-3c2f8e4d5a10")
 
     static let allCharacteristicUUIDs = [
-        ssidUUID, passwordUUID, commandUUID, statusUUID, scanResultsUUID, ethernetIPUUID, leasesUUID, relaysUUID
+        ssidUUID, passwordUUID, commandUUID, statusUUID, scanResultsUUID, ethernetIPUUID, leasesUUID, relaysUUID,
+        victronUUID
     ]
 }
 
@@ -115,4 +117,58 @@ struct RelayState: Decodable, Equatable, Identifiable {
 
     var id: Int { port }
     var isOn: Bool { state == "on" }
+}
+
+/// Identifies the connected Victron device, if any -- pi-bluetooth-configuration's
+/// README, "Victron solar/battery telemetry".
+struct VictronDevice: Decodable, Equatable {
+    var pid: String
+    var name: String
+    var serial: String
+    var fw: String
+}
+
+/// Latest solar/battery reading pi-bluetooth-configuration forwards from
+/// victron-ve-direct-alpine's status port -- see that repo's README,
+/// "Victron solar/battery telemetry". Field names and units match
+/// victron-ve-direct-alpine's own data_port JSON exactly.
+///
+/// Every field but `connected` is optional and decoded leniently
+/// (auto-synthesized `Decodable` uses `decodeIfPresent` for Optional
+/// properties): `connected: false` alone covers every failure case --
+/// victron-ve-direct-alpine not installed, not reachable, or not yet
+/// synced a frame -- so there's nothing else to decode in that case.
+///
+/// SOC/TTG (state of charge, time to go) exist on the wire for battery
+/// monitors but are deliberately not modeled here -- this integration
+/// targets MPPT solar chargers, which don't report them. LOAD (the
+/// charger's load output switch state) is also deliberately not
+/// modeled -- not every MPPT model has a load output terminal, and on
+/// this integration's hardware it's always "ON", so there's nothing
+/// informative to show.
+struct VictronStatus: Decodable, Equatable {
+    var connected: Bool
+    var device: VictronDevice?
+    var V: Double?
+    var I: Double?
+    var VPV: Double?
+    var PPV: Double?
+    var CS: Int?
+    var CSName: String?
+    var ERR: Int?
+    var ERRName: String?
+    var H20: Double?
+
+    static let disconnected = VictronStatus(
+        connected: false, device: nil, V: nil, I: nil, VPV: nil, PPV: nil, CS: nil, CSName: nil,
+        ERR: nil, ERRName: nil, H20: nil
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case connected, device, V, I, VPV, PPV, CS
+        case CSName = "CS_name"
+        case ERR
+        case ERRName = "ERR_name"
+        case H20
+    }
 }

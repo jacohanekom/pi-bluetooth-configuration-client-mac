@@ -93,67 +93,164 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Setup finished: WiFi + Local Network details
+    // MARK: - Setup finished: post-init details screen
+    //
+    // Shown once the wizard is done (ble.status.finished): WiFi/network
+    // stats, relay controls, and Victron solar/battery telemetry, each
+    // behind its own DisclosureGroup rather than stacked flat -- there's
+    // a lot of information across the three, so each collapses until
+    // tapped open. Connectivity starts expanded since it's the one most
+    // people check first (the "did WiFi actually come up" question);
+    // Relays/Solar-Battery start collapsed.
 
     private var connectedDetailsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Connected to \(ble.connectedName ?? "device")")
-                .font(.headline)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Connected to \(ble.connectedName ?? "device")")
+                    .font(.headline)
 
-            GroupBox("WiFi") {
-                VStack(alignment: .leading, spacing: 6) {
-                    LabeledContent("Network", value: ble.status.ssid)
-                    LabeledContent("IP address", value: ble.status.ip)
+                connectivityDisclosure
+                relaysDisclosure
+                solarBatteryDisclosure
+
+                Button("Reset") {
+                    ble.resetNetwork()
                 }
-                .padding(.top, 4)
+                .buttonStyle(.bordered)
             }
+        }
+    }
 
-            GroupBox("Local Network") {
-                VStack(alignment: .leading, spacing: 6) {
-                    LabeledContent("Gateway IP", value: ble.ethernetConfig.ip)
-                    LabeledContent("DHCP range", value: "\(rangeAddress(ble.ethernetConfig.rangeStart)) – \(rangeAddress(ble.ethernetConfig.rangeEnd))")
-                    if ble.dhcpLeases.isEmpty {
-                        Text("No devices connected")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(ble.dhcpLeases) { lease in
-                            LabeledContent(lease.hostname.isEmpty ? lease.mac : lease.hostname, value: lease.ip)
+    // MARK: - Connectivity (WiFi + Local Network)
+
+    @State private var connectivityExpanded = true
+
+    private var connectivityDisclosure: some View {
+        DisclosureGroup("Connectivity", isExpanded: $connectivityExpanded) {
+            VStack(alignment: .leading, spacing: 16) {
+                GroupBox("WiFi") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("Network", value: ble.status.ssid)
+                        LabeledContent("IP address", value: ble.status.ip)
+                    }
+                    .padding(.top, 4)
+                }
+
+                GroupBox("Local Network") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("Gateway IP", value: ble.ethernetConfig.ip)
+                        LabeledContent("DHCP range", value: "\(rangeAddress(ble.ethernetConfig.rangeStart)) – \(rangeAddress(ble.ethernetConfig.rangeEnd))")
+                        if ble.dhcpLeases.isEmpty {
+                            Text("No devices connected")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(ble.dhcpLeases) { lease in
+                                LabeledContent(lease.hostname.isEmpty ? lease.mac : lease.hostname, value: lease.ip)
+                            }
                         }
                     }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
             }
-
-            if !ble.relays.isEmpty {
-                relaysSection
-            }
-
-            Button("Reset") {
-                ble.resetNetwork()
-            }
-            .buttonStyle(.bordered)
+            .padding(.top, 8)
         }
+        .font(.headline)
     }
 
     // MARK: - Relays (pi-relay-control-alpine, via pi-bluetooth-configuration)
 
-    private var relaysSection: some View {
-        GroupBox("Relays") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(ble.relays) { relay in
-                    Toggle(isOn: Binding(
-                        get: { relay.isOn },
-                        set: { ble.setRelay(port: relay.port, on: $0) }
-                    )) {
-                        Text(relay.label)
+    @State private var relaysExpanded = false
+
+    private var relaysDisclosure: some View {
+        DisclosureGroup("Relays", isExpanded: $relaysExpanded) {
+            Group {
+                if ble.relays.isEmpty {
+                    Text("No relays configured")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(ble.relays) { relay in
+                            Toggle(isOn: Binding(
+                                get: { relay.isOn },
+                                set: { ble.setRelay(port: relay.port, on: $0) }
+                            )) {
+                                Text(relay.label)
+                            }
+                            .toggleStyle(.switch)
+                            .disabled(relay.state == "unknown")
+                        }
                     }
-                    .toggleStyle(.switch)
-                    .disabled(relay.state == "unknown")
                 }
             }
-            .padding(.top, 4)
+            .padding(.top, 8)
         }
+        .font(.headline)
+    }
+
+    // MARK: - Solar/Battery Information (victron-ve-direct-alpine, via pi-bluetooth-configuration)
+
+    @State private var solarBatteryExpanded = false
+
+    private var solarBatteryDisclosure: some View {
+        DisclosureGroup("Solar/Battery Information", isExpanded: $solarBatteryExpanded) {
+            Group {
+                if !ble.victronStatus.connected {
+                    Text("No Victron device connected")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let device = ble.victronStatus.device {
+                            LabeledContent("Device", value: device.name)
+                            LabeledContent("Serial", value: device.serial)
+                        }
+                        if let v = ble.victronStatus.V {
+                            LabeledContent("Battery Voltage", value: String(format: "%.2f V", v))
+                        }
+                        if let i = ble.victronStatus.I {
+                            LabeledContent("Battery Current", value: formattedBatteryCurrent(i))
+                        }
+                        if let vpv = ble.victronStatus.VPV {
+                            LabeledContent("Solar Voltage", value: String(format: "%.2f V", vpv))
+                        }
+                        if let ppv = ble.victronStatus.PPV {
+                            LabeledContent("Solar Input", value: String(format: "%.0f W", ppv))
+                        }
+                        if let csName = ble.victronStatus.CSName {
+                            LabeledContent("Charge State", value: csName)
+                        }
+                        if let errName = ble.victronStatus.ERRName {
+                            LabeledContent("Error", value: errName)
+                        }
+                        if let h20 = ble.victronStatus.H20 {
+                            LabeledContent("Yield Today", value: String(format: "%.2f kWh", h20))
+                        }
+                    }
+                }
+            }
+            .padding(.top, 8)
+        }
+        .font(.headline)
+    }
+
+    // Note: no state-of-charge / time-to-go here -- those only exist on
+    // battery monitors (BMV-series), not the MPPT solar chargers this
+    // integration targets. Also no load output switch state -- not
+    // every MPPT has one, and it's always "ON" on this integration's
+    // hardware, so there's nothing informative to show. Neither field
+    // is reported by victron_control.hpp on the daemon side.
+
+    // Victron's "I" is signed: positive while the battery is charging,
+    // negative while it's discharging (a load drawing current), zero
+    // when idle. The raw sign alone isn't obvious at a glance, so this
+    // spells out which one it means alongside the magnitude.
+    private func formattedBatteryCurrent(_ amps: Double) -> String {
+        let magnitude = String(format: "%.2f A", abs(amps))
+        if amps > 0.01 { return "\(magnitude) (charging)" }
+        if amps < -0.01 { return "\(magnitude) (discharging)" }
+        return "\(magnitude) (idle)"
     }
 
     private func rangeAddress(_ lastOctet: Int) -> String {
