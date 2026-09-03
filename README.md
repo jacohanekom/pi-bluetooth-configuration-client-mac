@@ -1,5 +1,12 @@
 # pi-bluetooth-configuration-client-mac
 
+> **Retired.** This repo is archived and no longer maintained. A phone in
+> your pocket covers the same provisioning need without requiring a Mac,
+> so use
+> [pi-bluetooth-configuration-client-ios](https://github.com/jacohanekom/pi-bluetooth-configuration-client-ios)
+> (**aipicam**) instead -- same GATT protocol, same screens, same feature
+> set. Kept here for reference/history only.
+
 **aipicam configuration** -- a small macOS app to configure WiFi on a
 Raspberry Pi running
 [pi-bluetooth-configuration](https://github.com/jacohanekom/pi-bluetooth-configuration-alpine)
