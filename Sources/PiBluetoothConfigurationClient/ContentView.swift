@@ -126,7 +126,7 @@ struct ContentView: View {
     @State private var connectivityExpanded = true
 
     private var connectivityDisclosure: some View {
-        DisclosureGroup("Connectivity", isExpanded: $connectivityExpanded) {
+        DisclosureGroup(isExpanded: $connectivityExpanded) {
             VStack(alignment: .leading, spacing: 16) {
                 GroupBox("WiFi") {
                     VStack(alignment: .leading, spacing: 6) {
@@ -154,8 +154,10 @@ struct ContentView: View {
                 }
             }
             .padding(.top, 8)
+            .padding(.trailing, 4)
+        } label: {
+            Text("Connectivity").font(.headline)
         }
-        .font(.headline)
     }
 
     // MARK: - Relays (pi-relay-control-alpine, via pi-bluetooth-configuration)
@@ -163,7 +165,7 @@ struct ContentView: View {
     @State private var relaysExpanded = false
 
     private var relaysDisclosure: some View {
-        DisclosureGroup("Relays", isExpanded: $relaysExpanded) {
+        DisclosureGroup(isExpanded: $relaysExpanded) {
             Group {
                 if ble.relays.isEmpty {
                     Text("No relays configured")
@@ -182,11 +184,19 @@ struct ContentView: View {
                             .disabled(relay.state == "unknown")
                         }
                     }
+                    // DisclosureGroup indents its content from the leading
+                    // edge but doesn't shrink the width it proposes to that
+                    // content to compensate -- without this, a full-width
+                    // control like a Toggle's switch (which hugs the
+                    // trailing edge) can render partly past the visible
+                    // bounds and look "cut off".
+                    .padding(.trailing, 20)
                 }
             }
             .padding(.top, 8)
+        } label: {
+            Text("Relays").font(.headline)
         }
-        .font(.headline)
     }
 
     // MARK: - Solar/Battery Information (victron-ve-direct-alpine, via pi-bluetooth-configuration)
@@ -194,7 +204,7 @@ struct ContentView: View {
     @State private var solarBatteryExpanded = false
 
     private var solarBatteryDisclosure: some View {
-        DisclosureGroup("Solar/Battery Information", isExpanded: $solarBatteryExpanded) {
+        DisclosureGroup(isExpanded: $solarBatteryExpanded) {
             Group {
                 if !ble.victronStatus.connected {
                     Text("No Victron device connected")
@@ -231,8 +241,9 @@ struct ContentView: View {
                 }
             }
             .padding(.top, 8)
+        } label: {
+            Text("Solar/Battery Information").font(.headline)
         }
-        .font(.headline)
     }
 
     // Note: no state-of-charge / time-to-go here -- those only exist on
